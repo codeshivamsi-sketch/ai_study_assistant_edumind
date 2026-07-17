@@ -676,9 +676,11 @@ git commit -m "feat(notifications): add BullMQ queue and NotifyQuizReady job pro
 Create `services/notifications/test/routes.test.ts`:
 
 ```typescript
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { buildApp } from "../src/main";
+import { prisma } from "../src/db";
+import { connection, notifyQuizReadyQueue } from "../src/queue";
 
 const ALICE_ID = "11111111-1111-1111-1111-111111111111";
 const BOB_ID = "22222222-2222-2222-2222-222222222222";
@@ -746,6 +748,12 @@ test("GET /notifications returns 404 when user_id doesn't match the caller", asy
   });
   assert.equal(response.statusCode, 404);
   await app.close();
+});
+
+after(async () => {
+  await notifyQuizReadyQueue.close();
+  await connection.quit();
+  await prisma.$disconnect();
 });
 ```
 
@@ -885,7 +893,7 @@ git commit -m "feat(notifications): add POST/GET /notifications endpoints"
 Create `services/notifications/test/grpc.test.ts`:
 
 ```typescript
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import * as grpc from "@grpc/grpc-js";
 import * as protoLoader from "@grpc/proto-loader";
@@ -893,6 +901,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { startGrpcServer } from "../src/grpc/server";
 import { prisma } from "../src/db";
+import { connection, notifyQuizReadyQueue } from "../src/queue";
 import { startNotifyQuizReadyWorker } from "../src/jobs/notifyQuizReady";
 
 const ALICE_ID = "11111111-1111-1111-1111-111111111111";
@@ -937,6 +946,12 @@ test("NotifyQuizReady enqueues a job that eventually writes a notification row",
 
   await worker.close();
   await new Promise<void>((resolve) => server.tryShutdown(() => resolve()));
+});
+
+after(async () => {
+  await notifyQuizReadyQueue.close();
+  await connection.quit();
+  await prisma.$disconnect();
 });
 ```
 

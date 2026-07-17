@@ -32,19 +32,26 @@ reports. Structure the report with these sections, in order:
   note whether the closure hit fixpoint or was capped by `--hops`, and at
   which hop; then a mermaid flowchart of the full closure, changed nodes
   marked distinctly from impacted nodes
-- `## DB Impact` — the db-blast skill's output: the endpoint/table/access
-  edge list, the migration SQL, and a mermaid flowchart built from the
-  edge list's NEW/REMOVED/CHANGED rows only (omit UNCHANGED — keep the
-  diagram focused on what this diff actually did). Style NEW edges solid
-  green, REMOVED edges dashed red, CHANGED edges solid orange labeled with
-  old→new access (e.g. `R → RW`); include a one-line legend under the
-  diagram. If any NEW/REMOVED/CHANGED edges exist, add a note that the
-  Data Access Map in docs/architecture.md is now stale and suggest
-  re-running /arch. If step 3 didn't fire, this section is just "No
-  DB-touching changes"
+- `## DB Impact` — diagram-first, from the db-blast skill's output, no
+  prose table:
+  a. the changed-edges diagram — a mermaid flowchart built from the edge
+     list's NEW/REMOVED/CHANGED rows only (omit UNCHANGED — keep it
+     focused on what this diff actually did). Style NEW edges solid green,
+     REMOVED edges dashed red, CHANGED edges solid orange labeled with
+     old→new access (e.g. `R → RW`); include a one-line legend under the
+     diagram
+  b. the migration SQL block (exact DDL), or "no migration files changed"
+  c. a one-paragraph risk assessment naming every flagged op in plain
+     language
+  d. a one-line summary — if any NEW/REMOVED/CHANGED edges exist, this is
+     where you note that the Data Access Map in docs/architecture.md is
+     now stale and suggest re-running /arch
+  If step 3 didn't fire, this section is just "No DB-touching changes"
 - `## Untested` — anything in the closure with no test touching it
-- `## Risk` — one paragraph covering both code and DB risk (skip the DB
-  half if there's no DB Impact)
+- `## Risk` — one paragraph covering code risk (from Code Impact). DB risk
+  is already reported in DB Impact's own risk paragraph above — don't
+  repeat it here; skip this section's DB half entirely if there's no DB
+  Impact
 
 After writing, show me the Code Impact table, the DB Impact section (if
 present), and the Risk paragraph inline, plus the saved file path.
