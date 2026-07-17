@@ -55,3 +55,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Tests hit a real Postgres (`postgresql+asyncpg://creditcore:creditcore@localhost:5432/creditcore`), not a mock or isolated test DB — `postgres` (at least) must be running via `make up`/`docker-compose up` for `pytest` to pass, and there's no rollback between tests
 - `ruff check .` currently reports 5 pre-existing `F401` unused-import findings (e.g. unused `base.Base` imports in both `database.py` files, unused model imports in both `migrations/env.py` files) — the new PostToolUse hook will surface these on unrelated edits to those files
 - No mypy/pyright configured — nothing enforces the `Mapped[...]` type annotations beyond what SQLAlchemy itself checks at runtime
+
+## Documentation
+- After any change that affects architecture, tech stack, services,
+  endpoints, or build phases, update README.md in the same task:
+  tech stack list, architecture diagram, API endpoint tables, and
+  the Build Phases section must always reflect the current code.
+- If a change removes a technology, remove it everywhere in the
+  README (badges, diagram, phases) — no stale references.
