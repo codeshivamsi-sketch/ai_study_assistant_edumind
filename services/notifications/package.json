@@ -6,7 +6,7 @@
     "copy-proto": "mkdir -p proto && cp ../../proto/notifications.proto proto/notifications.proto",
     "build": "npm run copy-proto && npx prisma generate && tsc",
     "start": "node dist/src/main.js",
-    "test": "npm run build && node --test dist/test"
+    "test": "npm run build && node --test 'dist/test/**/*.test.js'"
   },
   "dependencies": {
     "@grpc/grpc-js": "^1.11.0",
