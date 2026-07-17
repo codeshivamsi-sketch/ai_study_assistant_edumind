@@ -1,0 +1,1 @@
+-- baseline: pre-existing schema (Alembic's tables), not managed by Prisma

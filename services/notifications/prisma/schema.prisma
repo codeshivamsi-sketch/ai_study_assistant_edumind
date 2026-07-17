@@ -1,0 +1,25 @@
+// This schema owns ONLY the `notifications` table. Do not add a `User`
+// model or any relation into `users` — that table belongs to core-api's
+// Alembic migrations. Never run `prisma migrate reset` or `prisma db pull`
+// against this database; both would destroy or corrupt Alembic's tables.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Notification {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id    String   @db.Uuid
+  quiz_id    String   @db.Uuid
+  message    String
+  read       Boolean  @default(false)
+  created_at DateTime @default(now())
+
+  @@index([user_id])
+  @@map("notifications")
+}
