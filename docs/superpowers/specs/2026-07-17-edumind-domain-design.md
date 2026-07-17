@@ -14,15 +14,20 @@ and record quiz attempts.
   Alembic chain (`alembic_version_ledger` table), and its `docker-compose.yml`
   service block. EduMind has no double-entry-bookkeeping equivalent, so
   there's no reason to keep a second service or a shell of one.
-- **Rename `services/origination/` → `services/edumind/`.** This becomes the
-  one and only service. Update `docker-compose.yml` build path, `Makefile`
-  targets/comments, and any hardcoded `services/origination` references
-  (CLAUDE.md, README.md, `docs/architecture.md`).
+- **Rename `services/origination/` → `services/core-api/`.** This becomes
+  the one and only service. The `edumind` name belongs to the platform as a
+  whole, not to one service — `core-api` is the generic, correct name for
+  "the one backend service." Update `docker-compose.yml` build path,
+  `Dockerfile` `WORKDIR`, `Makefile` targets/comments, `alembic.ini` paths,
+  imports, and any hardcoded `services/origination` references (CLAUDE.md,
+  README.md, `docs/architecture.md`).
 - **Rename the database**: `creditcore` → `edumind` (db name, user, password
-  all become `edumind`). `docker-compose.yml`'s postgres service gets a fresh
-  volume under the new name/credentials — old lending tables won't exist
-  there. Connection strings in `database.py`, `migrations/env.py`,
-  `tests/test_routes.py`, and `docker-compose.yml` all update accordingly.
+  all become `edumind`) — this stays `edumind` regardless of the service
+  rename above, since it's shared platform data, not service-scoped.
+  `docker-compose.yml`'s postgres service gets a fresh volume under the new
+  name/credentials — old lending tables won't exist there. Connection
+  strings in `database.py`, `migrations/env.py`, `tests/test_routes.py`, and
+  `docker-compose.yml` all update accordingly.
 - **Kafka**: already fully removed from the codebase in a prior commit
   (`0d56fbe removed kafka from project`) — zero Kafka code remains anywhere
   in `services/`. CLAUDE.md, README.md, and `docs/architecture.md` still
@@ -30,7 +35,7 @@ and record quiz attempts.
   the doc rewrite in this change (no code change needed, docs only).
 - **Celery/Redis**: kept wired per approved decision, but the
   `run_credit_check` task is lending-specific and is deleted along with
-  `LoanApplication`. `services/edumind/worker.py` keeps the `celery_app`
+  `LoanApplication`. `services/core-api/worker.py` keeps the `celery_app`
   config (broker/backend via `REDIS_URL`) with no task defined — ready for a
   future async job (e.g. quiz generation) without inventing one now.
   `docker-compose.yml`'s `worker` and `redis` services are otherwise
@@ -40,7 +45,7 @@ and record quiz attempts.
   the ledger service, called out in CLAUDE.md's existing Gotchas). Remove the
   filter entirely — nothing in this service needs it.
 
-## Data model (`services/edumind/models.py`)
+## Data model (`services/core-api/models.py`)
 
 Replaces `LoanApplication`/`LoanStatus` entirely. SQLAlchemy 2.0
 `Mapped`/`mapped_column` style, matching the existing service's conventions.
@@ -79,7 +84,7 @@ quiz_attempts
 survives deletion attempts on quizzes/users — a delete of a quiz or user with
 existing attempts must fail at the DB level.
 
-## Identity (`services/edumind/identity.py`)
+## Identity (`services/core-api/identity.py`)
 
 No auth system — a FastAPI dependency `get_current_user`:
 - Reads the `X-User-Id` header.
@@ -89,7 +94,7 @@ No auth system — a FastAPI dependency `get_current_user`:
 
 Applied via `Depends` on every route except `GET /health`.
 
-## Endpoints (`services/edumind/routes.py`)
+## Endpoints (`services/core-api/routes.py`)
 
 All ownership checks return **404** (never 403) on a resource that exists
 but isn't the caller's — cross-user probing must not distinguish "doesn't
@@ -134,7 +139,7 @@ No endpoints for `users` (seed-only) or `GET` on `quiz_attempts` directly
 - New revision 2 (seed): insert 2 test users with fixed, known UUIDs/emails
   so tests and manual smoke checks can reference them directly.
 
-## Tests (`services/edumind/tests/test_routes.py`)
+## Tests (`services/core-api/tests/test_routes.py`)
 
 Rewritten for the new domain, same real-Postgres + `ASGITransport` pattern
 as today (no rollback between tests, requires `make up`'s postgres running):
