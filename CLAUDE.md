@@ -48,6 +48,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Blast-radius snapshots: `docs/blast/`
 - Module intent: `services/<service>/README.md` (none exist yet — this repo's README.md at the root is currently the only architecture writeup)
 
+## Documentation
+- After any change affecting architecture, stack, services, endpoints, or
+  phases, update README.md in the same task — no stale references.
+- If a technology is removed, remove it everywhere (badges, diagrams,
+  phase notes).
+
 ## Gotchas
 - **Kafka does not connect Origination and Ledger, despite what the README's diagram shows.** Ledger has zero Kafka code or dependency. Origination publishes `loan.submitted` and also consumes it itself (`group_id="origination-group"`), but the consumer only logs the message — it doesn't call Ledger. Ledger entries are created solely by direct `POST /postings` calls. Don't assume the event wires anything together; see `docs/architecture.md` for the verified data flow
 - `services/origination/migrations/env.py` has an `include_object` filter that excludes every table except `"ledger_entries"` — this appears copy-pasted from the ledger service and will silently drop `loan_applications` from `alembic revision --autogenerate` in origination. Fix or remove before relying on autogenerate there
@@ -55,11 +61,3 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Tests hit a real Postgres (`postgresql+asyncpg://creditcore:creditcore@localhost:5432/creditcore`), not a mock or isolated test DB — `postgres` (at least) must be running via `make up`/`docker-compose up` for `pytest` to pass, and there's no rollback between tests
 - `ruff check .` currently reports 5 pre-existing `F401` unused-import findings (e.g. unused `base.Base` imports in both `database.py` files, unused model imports in both `migrations/env.py` files) — the new PostToolUse hook will surface these on unrelated edits to those files
 - No mypy/pyright configured — nothing enforces the `Mapped[...]` type annotations beyond what SQLAlchemy itself checks at runtime
-
-## Documentation
-- After any change that affects architecture, tech stack, services,
-  endpoints, or build phases, update README.md in the same task:
-  tech stack list, architecture diagram, API endpoint tables, and
-  the Build Phases section must always reflect the current code.
-- If a change removes a technology, remove it everywhere in the
-  README (badges, diagram, phases) — no stale references.
