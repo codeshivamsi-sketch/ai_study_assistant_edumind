@@ -2,6 +2,7 @@ import Fastify from "fastify";
 import { ZodError } from "zod";
 import { registerRoutes } from "./routes";
 import { startNotifyQuizReadyWorker } from "./jobs/notifyQuizReady";
+import { startGrpcServer } from "./grpc/server";
 import { logger } from "./logger";
 
 export function buildApp() {
@@ -27,6 +28,10 @@ async function main() {
 
   startNotifyQuizReadyWorker();
   logger.info("BullMQ worker started");
+
+  const grpcPort = Number(process.env.GRPC_PORT ?? 5001);
+  startGrpcServer(grpcPort);
+  logger.info(`gRPC server listening on port ${grpcPort}`);
 }
 
 if (require.main === module) {
