@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - Shared DB is `edumind` (Postgres 16, already running via `docker-compose`'s `postgres` service) — every write in this plan lands there.
-- **Never run `prisma migrate reset` or `prisma db pull` against this database** — either would destroy or corrupt the Alembic-owned tables (`users`, `documents`, `quizzes`, `quiz_attempts`). Only `prisma migrate dev --create-only` (to generate a migration file without applying it) and `prisma migrate deploy` (non-interactive apply) are safe.
+- **Never run `prisma migrate dev` (in any form, including `--create-only`) or `prisma db pull` against this database.** `migrate dev`'s drift check diffs the whole `public` schema against Prisma's migration history and offers an interactive reset the first time it sees Alembic's tables — `--create-only` does not skip that check. Migration folders/files are hand-written directly (see Task 3); the only Prisma command ever run against this DB is `prisma migrate deploy`, which applies pending migrations without drift detection.
 - Prisma's `schema.prisma` models `Notification` only — never add a Prisma `User` model or any `@relation` into `users`.
 - `notifications.user_id`'s Postgres FK is hand-written SQL in the generated migration, not a Prisma-declared relation.
 - All ownership checks return `404`, never `403` — same invariant `core-api` already established (see `CLAUDE.md`).
@@ -287,20 +287,26 @@ cp .env.example .env
 
 (`.env` is already covered by the root `.gitignore`'s existing `.env` entry — do not commit it.)
 
-- [ ] **Step 4: Generate the migration file without applying it**
+- [ ] **Step 4: Hand-create the migration folder and file (do not use `prisma migrate dev`)**
 
 Requires `postgres` running: `docker-compose up -d postgres` from the repo root if it isn't already up.
 
+**Do not run `prisma migrate dev` (with or without `--create-only`) against this database.** Its drift check diffs the *entire* `public` schema against Prisma's (empty) migration history on the very first run — since Alembic's tables (`users`, `documents`, `quizzes`, `quiz_attempts`, `alembic_version`) are invisible to that history, Prisma classifies all of them as drift and offers an interactive schema reset ("You may use prisma migrate reset... All data will be lost"). `--create-only` does not skip this check — the check runs before the create-only migration is even generated. `prisma migrate deploy` (Step 6) does not run drift detection at all, so it's the only command from this family that's safe here.
+
+Create the migration folder by hand, using today's date/time as the
+timestamp prefix in Prisma's `YYYYMMDDHHMMSS_<name>` convention (run
+`date +%Y%m%d%H%M%S` to get it, never guess it):
+
 ```bash
 cd services/notifications
-npx prisma migrate dev --create-only --name create_notifications
+mkdir -p "prisma/migrations/$(date +%Y%m%d%H%M%S)_create_notifications"
 ```
 
-Expected: creates `prisma/migrations/<timestamp>_create_notifications/migration.sql` with a `CREATE TABLE "notifications" (...)` statement, no FK. Note the exact `<timestamp>` printed in the command output — you'll need it for the next step.
+Note the exact folder name you created — you need it for the next step.
 
-- [ ] **Step 5: Hand-edit the generated migration to add the FK**
+- [ ] **Step 5: Write the migration SQL directly**
 
-Open `prisma/migrations/<timestamp>_create_notifications/migration.sql` (the file from Step 4) and replace its entire contents with:
+Create `prisma/migrations/<timestamp>_create_notifications/migration.sql` (the folder from Step 4) with:
 
 ```sql
 -- CreateTable
