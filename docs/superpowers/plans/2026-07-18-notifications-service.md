@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - Shared DB is `edumind` (Postgres 16, already running via `docker-compose`'s `postgres` service) — every write in this plan lands there.
-- **Never run `prisma migrate dev` (in any form, including `--create-only`) or `prisma db pull` against this database.** `migrate dev`'s drift check diffs the whole `public` schema against Prisma's migration history and offers an interactive reset the first time it sees Alembic's tables — `--create-only` does not skip that check. Migration folders/files are hand-written directly (see Task 3); the only Prisma command ever run against this DB is `prisma migrate deploy`, which applies pending migrations without drift detection.
+- **Never run `prisma migrate dev` (in any form, including `--create-only`) or `prisma db pull` against this database.** `migrate dev`'s drift check diffs the whole `public` schema against Prisma's migration history and offers an interactive reset the first time it sees Alembic's tables — `--create-only` does not skip that check. Migration folders/files are hand-written directly (see Task 3). The only two Prisma commands ever run against this DB are `prisma migrate resolve --applied <name>` (marks a migration applied without executing its SQL — used once, to baseline Prisma's history against Alembic's pre-existing tables) and `prisma migrate deploy` (applies pending migrations, no drift detection).
 - Prisma's `schema.prisma` models `Notification` only — never add a Prisma `User` model or any `@relation` into `users`.
 - `notifications.user_id`'s Postgres FK is hand-written SQL in the generated migration, not a Prisma-declared relation.
 - All ownership checks return `404`, never `403` — same invariant `core-api` already established (see `CLAUDE.md`).
@@ -329,16 +329,42 @@ CREATE INDEX "notifications_user_id_idx" ON "notifications"("user_id");
 ALTER TABLE "notifications" ADD CONSTRAINT "notifications_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 ```
 
-- [ ] **Step 6: Apply the migration**
+- [ ] **Step 6: Baseline Prisma's migration history before deploying**
+
+`prisma migrate deploy` refuses to run against a database that already
+has schema objects but no `_prisma_migrations` bookkeeping table yet
+(error `P3005`, "the database schema is not empty") — this DB has
+Alembic's five tables and no Prisma history. This is Prisma's documented
+baselining case for adopting Prisma against an existing database
+(https://pris.ly/d/migrate-baseline): mark a no-op placeholder migration
+as already-applied so Prisma's history has a starting point, without
+running any SQL against the database.
+
+```bash
+cd services/notifications
+mkdir -p prisma/migrations/00000000000000_baseline
+echo "-- baseline: pre-existing schema (Alembic's tables), not managed by Prisma" > prisma/migrations/00000000000000_baseline/migration.sql
+npx prisma migrate resolve --applied 00000000000000_baseline
+```
+
+Expected: `Migration 00000000000000_baseline marked as applied.` —
+`migrate resolve --applied` only inserts a bookkeeping row into
+`_prisma_migrations`; it does not execute the migration's SQL, so the
+placeholder file's contents don't matter beyond documenting why it
+exists. The `00000000000000` prefix guarantees it always sorts before
+every real migration.
+
+- [ ] **Step 7: Apply the migration**
 
 ```bash
 cd services/notifications
 npx prisma migrate deploy
 ```
 
-Expected output includes `1 migration found... Applied`.
+Expected output includes `1 migration found... Applied` (the baseline
+from Step 6 is already resolved, so only `create_notifications` applies).
 
-- [ ] **Step 7: Verify the table and FK**
+- [ ] **Step 8: Verify the table and FK**
 
 ```bash
 docker exec python_backend_refresher-postgres-1 psql -U edumind -d edumind -c "\d notifications"
@@ -346,7 +372,7 @@ docker exec python_backend_refresher-postgres-1 psql -U edumind -d edumind -c "\
 
 Expected: shows columns `id, user_id, quiz_id, message, read, created_at`, index `notifications_user_id_idx`, and `FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE`.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
 cd /Users/shivam/Desktop/projects_2/python_backend_refresher
