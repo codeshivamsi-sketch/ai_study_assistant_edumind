@@ -908,7 +908,7 @@ const ALICE_ID = "11111111-1111-1111-1111-111111111111";
 const TEST_GRPC_PORT = 5099;
 
 function loadClient() {
-  const PROTO_PATH = path.join(__dirname, "..", "proto", "notifications.proto");
+  const PROTO_PATH = path.join(__dirname, "..", "..", "proto", "notifications.proto");
   const packageDefinition = protoLoader.loadSync(PROTO_PATH, { keepCase: true });
   const proto = grpc.loadPackageDefinition(packageDefinition) as any;
   return new proto.notifications.NotificationService(
@@ -975,7 +975,7 @@ import path from "node:path";
 import { enqueueNotifyQuizReady } from "../queue";
 import { logger } from "../logger";
 
-const PROTO_PATH = path.join(__dirname, "..", "..", "proto", "notifications.proto");
+const PROTO_PATH = path.join(__dirname, "..", "..", "..", "proto", "notifications.proto");
 
 const packageDefinition = protoLoader.loadSync(PROTO_PATH, {
   keepCase: true,
