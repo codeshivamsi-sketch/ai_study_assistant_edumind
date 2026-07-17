@@ -225,3 +225,9 @@ venv/
 # Generated gRPC stubs (regenerate with `make proto`)
 services/core-api/notifications_pb2.py
 services/core-api/notifications_pb2_grpc.py
+
+# Node (services/notifications)
+services/notifications/node_modules/
+services/notifications/dist/
+services/notifications/proto/
+services/notifications/generated/
