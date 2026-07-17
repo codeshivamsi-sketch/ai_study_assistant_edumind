@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+package notifications;
+
+service NotificationService {
+  rpc NotifyQuizReady (NotifyQuizReadyRequest) returns (NotifyQuizReadyResponse);
+}
+
+message NotifyQuizReadyRequest {
+  string user_id = 1;
+  string quiz_id = 2;
+}
+
+message NotifyQuizReadyResponse {
+  bool accepted = 1;
+}
