@@ -4,13 +4,13 @@ services:
   postgres:
     image: postgres:16
     environment:
-      POSTGRES_USER: creditcore
-      POSTGRES_PASSWORD: creditcore
-      POSTGRES_DB: creditcore
+      POSTGRES_USER: edumind
+      POSTGRES_PASSWORD: edumind
+      POSTGRES_DB: edumind
     ports:
       - "5432:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U creditcore"]
+      test: ["CMD-SHELL", "pg_isready -U edumind"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -20,8 +20,8 @@ services:
     ports:
       - "6379:6379"
 
-  origination:
-    build: ./services/origination
+  core-api:
+    build: ./services/core-api
     ports:
       - "8000:8000"
     depends_on:
@@ -30,30 +30,18 @@ services:
       redis:
         condition: service_started
     environment:
-      DATABASE_URL: postgresql+asyncpg://creditcore:creditcore@postgres:5432/creditcore
+      DATABASE_URL: postgresql+asyncpg://edumind:edumind@postgres:5432/edumind
       REDIS_URL: redis://redis:6379/0
     command: >
       sh -c "alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port 8000"
 
-  ledger:
-    build: ./services/ledger
-    ports:
-      - "8001:8001"
-    depends_on:
-      postgres:
-        condition: service_healthy
-    environment:
-      DATABASE_URL: postgresql+asyncpg://creditcore:creditcore@postgres:5432/creditcore
-    command: >
-      sh -c "alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port 8001"
-
   worker:
-    build: ./services/origination
+    build: ./services/core-api
     depends_on:
       - redis
       - postgres
     environment:
-      DATABASE_URL: postgresql+asyncpg://creditcore:creditcore@postgres:5432/creditcore
+      DATABASE_URL: postgresql+asyncpg://edumind:edumind@postgres:5432/edumind
       REDIS_URL: redis://redis:6379/0
     command: celery -A worker worker --loglevel=info
 
@@ -72,4 +60,3 @@ services:
       GF_SECURITY_ADMIN_PASSWORD: admin
     depends_on:
       - prometheus
-    

@@ -4,8 +4,7 @@ from sqlalchemy import engine_from_config
 from sqlalchemy import pool
 
 from alembic import context
-
-from models import LedgerEntry
+from models import User, Document, Quiz, QuizAttempt
 from base import Base
 import os
 
@@ -13,7 +12,7 @@ import os
 # access to the values within the .ini file in use.
 config = context.config
 
-# Read DATABASE_URL from environment if available
+# Read DATABASE_URL from env if available
 database_url = os.getenv("DATABASE_URL")
 if database_url:
     # alembic needs psycopg2, not asyncpg
@@ -55,7 +54,6 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
-        version_table="alembic_version_ledger"
     )
 
     with context.begin_transaction():
@@ -77,9 +75,7 @@ def run_migrations_online() -> None:
 
     with connectable.connect() as connection:
         context.configure(
-            connection=connection,
-            target_metadata=target_metadata,
-            version_table="alembic_version_ledger"
+            connection=connection, target_metadata=target_metadata,
         )
 
         with context.begin_transaction():

@@ -3,7 +3,7 @@ from sqlalchemy.orm import sessionmaker
 from base import Base
 import os
 
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql+asyncpg://creditcore:creditcore@localhost:5432/creditcore") 
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql+asyncpg://edumind:edumind@localhost:5432/edumind")
 
 engine = create_async_engine(DATABASE_URL, echo=False)
 
@@ -12,3 +12,7 @@ AsyncSessionLocal = sessionmaker(
     class_=AsyncSession,
     expire_on_commit=False
 )
+
+async def get_db():
+    async with AsyncSessionLocal() as session:
+        yield session

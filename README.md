@@ -1,6 +1,6 @@
-# Backend in python — refresher — CreditCore
+# Backend in python — refresher — EduMind
 
-A minimal project to refresh hands-on familiarity with backend infrastructure in python: async APIs, microservices, event driven architecture, observability, and containerisation, built around a trivial lending domain. Each technology is wired in just enough to work; none are used in depth.
+A minimal project to refresh hands-on familiarity with backend infrastructure in python: async APIs, ORM + migrations, background jobs, observability, and containerisation, built around a trivial study-assistant domain (EduMind: upload a document, generate a quiz from it, record attempts). Each technology is wired in just enough to work; none are used in depth.
 
 ![Python](https://img.shields.io/badge/Python-3776AB?style=flat&logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=flat&logo=fastapi&logoColor=white)
@@ -20,17 +20,16 @@ flowchart TD
 
     subgraph Docker ["Docker Compose"]
         subgraph Services ["Services"]
-            Orig["Origination\nFastAPI · port 8000\nSQLAlchemy · structlog"]
-            Ledger["Ledger\nFastAPI · port 8001\nDouble-entry bookkeeping"]
+            Core["core-api\nFastAPI · port 8000\nSQLAlchemy · structlog"]
         end
 
-        subgraph Messaging ["Async Jobs"]
+        subgraph Messaging ["Async Jobs (wired, no task yet)"]
             Redis[("Redis\nport 6379 · broker")]
-            Celery["Celery Worker\ncredit check jobs"]
+            Celery["Celery Worker\nno task registered"]
         end
 
         subgraph Data ["Data"]
-            PG[("PostgreSQL\nport 5432\nAlembic migrations")]
+            PG[("PostgreSQL: edumind\nport 5432\nAlembic migrations")]
         end
 
         subgraph Observability ["Observability"]
@@ -39,21 +38,13 @@ flowchart TD
         end
     end
 
-    Client -->|HTTP| Orig
-    Client -->|HTTP| Ledger
+    Client -->|HTTP, X-User-Id header| Core
+    Core -->|SQL| PG
 
-    Orig -->|SQL| PG
-    Ledger -->|SQL| PG
-
-    Orig -->|enqueue task| Redis
-    Redis --> Celery
-    Celery -.->|writes result| PG
-
-    Prom -.->|scrapes /metrics| Orig
-    Prom -.->|scrapes /metrics| Ledger
+    Prom -.->|scrapes /metrics| Core
     Prom --> Grafana
 
-    pytest -.->|async tests| Orig
+    pytest -.->|async tests| Core
 ```
 
 ## Tech Stack
@@ -61,7 +52,7 @@ flowchart TD
 - **FastAPI** — REST API framework
 - **PostgreSQL** — primary database
 - **SQLAlchemy + Alembic** — ORM and migrations
-- **Redis + Celery** — async background jobs
+- **Redis + Celery** — wired for background jobs, no task registered yet
 - **structlog** — structured JSON logging
 - **Prometheus** — metrics scraping
 - **Grafana** — metrics visualisation
@@ -69,9 +60,7 @@ flowchart TD
 
 ## Services
 
-- **Origination** (port 8000) — loan application lifecycle, idempotency, credit check jobs
-- **Ledger** (port 8001) — double-entry bookkeeping for financial records
-
+- **core-api** (port 8000) — study-assistant domain: users, documents, quizzes generated from documents, and quiz attempts. No auth system — identity is a plain `X-User-Id` header, validated against the `users` table.
 
 ## Running Locally
 
@@ -88,40 +77,36 @@ make up
 ### Run migrations
 
 ```bash
-# Origination
-cd services/origination
-alembic upgrade head
-
-# Ledger
-cd services/ledger
+cd services/core-api
 alembic upgrade head
 ```
 
 ### Run tests
 
 ```bash
-cd services/origination
+cd services/core-api
 pytest tests/ -v
 ```
 
 ## API Endpoints
 
-### Origination Service
-
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/applications` | Create loan application |
-| GET | `/applications/{id}` | Get application by ID |
-| PATCH | `/applications/{id}/submit` | Submit application |
-| GET | `/tasks/{task_id}` | Check credit check job status |
+| POST | `/documents` | Create a document (owned by the caller) |
+| GET | `/documents` | List the caller's documents |
+| GET | `/documents/{id}` | Get a document (404 if not the caller's) |
+| PATCH | `/documents/{id}` | Update a document (404 if not the caller's) |
+| DELETE | `/documents/{id}` | Delete a document (404 if not the caller's) |
+| POST | `/quizzes` | Create a quiz on one of the caller's documents |
+| GET | `/quizzes` | List quizzes on the caller's documents |
+| GET | `/quizzes/{id}` | Get a quiz (404 if its document isn't the caller's) |
+| PATCH | `/quizzes/{id}` | Update a quiz (404 if its document isn't the caller's) |
+| DELETE | `/quizzes/{id}` | Delete a quiz (404 if its document isn't the caller's) |
+| POST | `/quiz_attempts` | Record an attempt (score is client-supplied) against one of the caller's quizzes |
+| GET | `/quizzes/{id}/stats` | Aggregate stats (`avg_score`, `attempt_count`) for a quiz (404 if not the caller's) |
 | GET | `/health` | Health check |
 
-### Ledger Service
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/postings` | Create debit + credit entry for a loan |
-| GET | `/postings/{loan_id}` | Get all ledger entries for a loan |
+All ownership checks return 404, never 403, so cross-user probing can't distinguish "doesn't exist" from "not yours."
 
 ## Observability
 
@@ -132,44 +117,36 @@ Prometheus and Grafana are included in the Docker setup.
 | Prometheus | http://localhost:9090 |
 | Grafana | http://localhost:3000 |
 
-Both services expose a /metrics endpoint scraped by Prometheus every 15s. Open Grafana at http://localhost:3000, add Prometheus as a datasource (http://prometheus:9090), and query metrics like http_requests_total for request counts and histogram_quantile(0.90, rate(http_request_duration_seconds_bucket[5m])) for p90 latency.
+`core-api` exposes a `/metrics` endpoint scraped by Prometheus every 15s. Open Grafana at http://localhost:3000, add Prometheus as a datasource (http://prometheus:9090), and query metrics like http_requests_total for request counts and histogram_quantile(0.90, rate(http_request_duration_seconds_bucket[5m])) for p90 latency.
 
 ![Grafana Dashboard](docs/grafana_dashboard.png)
 
 ## Build Phases
 
 ### Phase 1 — FastAPI + PostgreSQL
-- Set up the Origination service with FastAPI.
-- Defined the `LoanApplication` model with SQLAlchemy ORM,
-- wired up an async PostgreSQL connection with `asyncpg`, and
-- built CRUD endpoints for creating and fetching loan applications.
+- Set up the service with FastAPI and an async PostgreSQL connection via `asyncpg`.
 
 ### Phase 2 — Alembic Migrations
 - Introduced Alembic for schema versioning. Migration scripts handle table creation and column changes, keeping the database schema in sync across environments without manual SQL.
 
-### Phase 3 — Idempotency
-- Added idempotency key support on the `POST /applications` endpoint. Duplicate requests with the same key return the original response instead of creating a new record — a standard pattern for safe retries in payment and lending systems.
+### Phase 3 — Idempotency (superseded)
+- The original lending domain added idempotency-key support on application creation. No longer applicable — removed along with the lending domain in Phase 6.
 
 ### Phase 4 — Celery + Redis
-- Wired up Redis as a task broker and Celery as a worker.
-- Submitting a loan application enqueues an async credit check job.
-- The worker processes it in the background and updates the application status — decoupling slow operations from the request lifecycle.
+- Wired up Redis as a task broker and Celery as a worker, originally for an async credit-check job. Kept wired through the domain rewrite (Phase 6) for a future async job; no task is currently registered.
 
 ### Phase 5 — Kafka (removed)
-- Kafka (KRaft mode) previously carried a `loan.submitted` event from Origination, consumed by an async background task in the same service — it never actually reached Ledger.
-- Removed entirely. Origination→Ledger communication will be replaced with direct REST/gRPC calls (coming next).
+- Kafka (KRaft mode) previously carried an event between two lending services. Removed entirely — see git history if you need it.
 
-### Phase 6 — Ledger Service
-- Built a second microservice for double-entry bookkeeping.
-- Every loan submission creates a matching debit and credit entry, reflecting standard accounting practice.
-- Ledger has its own FastAPI app, database, and Alembic migrations — fully independent of Origination.
+### Phase 6 — EduMind domain rewrite
+- Replaced the lending domain (`LoanApplication`, a second `ledger` service for double-entry bookkeeping) with EduMind's study-assistant domain: `users`, `documents`, `quizzes`, `quiz_attempts`, all ownership-scoped via `X-User-Id`.
+- Consolidated to a single service, `core-api`, and renamed the shared database to `edumind`.
 
 ### Phase 7 — Docker
-- Containerised all services with individual Dockerfiles.
-- `docker-compose.yml` orchestrates Origination, Ledger, Celery worker, PostgreSQL, and Redis with healthchecks and dependency ordering. - A `Makefile` wraps common commands (`make up`, `make down`, `make logs`).
+- Containerised the service with its own Dockerfile.
+- `docker-compose.yml` orchestrates core-api, the Celery worker, PostgreSQL, and Redis with healthchecks and dependency ordering. A `Makefile` wraps common commands (`make up`, `make down`, `make logs`).
 
 ### Phase 8 — Observability
-- Added `prometheus-fastapi-instrumentator` to both services to expose a `/metrics` endpoint.
+- Added `prometheus-fastapi-instrumentator` to expose a `/metrics` endpoint.
 - Prometheus scrapes metrics every 15s.
 - Grafana visualises request rate, p90 latency, and error rates per endpoint — giving production-style visibility into the running system.
-

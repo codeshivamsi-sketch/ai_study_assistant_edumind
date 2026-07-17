@@ -1,7 +1,4 @@
 scrape_configs:
-  - job_name: origination
+  - job_name: core-api
     static_configs:
-      - targets: ["origination:8000"]
-  - job_name: ledger
-    static_configs:
-      - targets: ["ledger:8001"]
+      - targets: ["core-api:8000"]

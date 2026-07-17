@@ -8,8 +8,12 @@ description: Trace the database impact of code changes — changed symbols → e
 When invoked:
 
 1. From `git diff main --name-only` (fall back to `git diff HEAD --name-only`
-   if there is no main branch), or the given paths, use codegraph to trace:
-   changed symbols → endpoints that reach them → ORM models
+   if there is no main branch), or the given paths, use codegraph to trace
+   changed symbols → endpoints that reach them: expand the caller frontier
+   hop by hop until a hop adds no new symbols (fixpoint) or a hops cap
+   passed in by the invoking command (e.g. /blast's `--hops`) is reached,
+   whichever comes first — no fixed depth otherwise. Record which hop the
+   trace stopped at. Then follow those endpoints → ORM models
    (SQLAlchemy/Prisma) they use → underlying tables. Mark each model access
    R (read), W (write), or RW (both) by the calls made (select/find/get =
    read; insert/update/delete/save/create = write).
@@ -34,7 +38,8 @@ When invoked:
    on an existing table without a default, and ALTERs that lock large
    tables (full-table rewrites, missing `CONCURRENTLY` on Postgres indexes).
 6. Output, in this order:
-   - the endpoint/table/access/status edge list from step 3
+   - the endpoint/table/access/status edge list from step 3, noting which
+     hop the endpoint trace stopped at (fixpoint or hops cap)
    - the migration SQL block, or "no migration files changed"
    - a one-paragraph risk assessment naming every flagged op in plain
      language

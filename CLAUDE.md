@@ -4,38 +4,36 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Stack
 - Python (Docker images pin `python:3.13-slim`; local interpreter here is 3.14 — see Gotchas)
-- FastAPI 0.138 — REST API framework, one independent app per service
+- FastAPI 0.138 — REST API framework, one service (`core-api`)
 - SQLAlchemy 2.0 (async, `Mapped`/`mapped_column` style) + Alembic 1.18 — ORM and migrations, asyncpg driver at runtime, psycopg2 for Alembic
-- Celery 5.6 + Redis — async credit-check job (origination only)
-- aiokafka — publishes/consumes the `loan.submitted` event (KRaft-mode Kafka, no Zookeeper)
-- structlog (origination only) — structured JSON logs
-- prometheus-fastapi-instrumentator — `/metrics` on both services, scraped by Prometheus, visualized in Grafana
-- pytest + pytest-asyncio + httpx `ASGITransport` — tests (origination only)
-- Docker Compose orchestrates postgres, redis, kafka, both services, the celery worker, prometheus, grafana
+- Celery 5.6 + Redis — wired (broker/backend configured in `worker.py`) but no task is currently registered; ready for a future async job
+- structlog — structured JSON logs
+- prometheus-fastapi-instrumentator — `/metrics`, scraped by Prometheus, visualized in Grafana
+- pytest + pytest-asyncio + httpx `ASGITransport` — tests
+- Docker Compose orchestrates postgres, redis, core-api, the celery worker, prometheus, grafana
 
 ## Commands
 - start everything: `make up`
 - stop: `make down`
 - logs: `make logs`
-- migrate origination: `cd services/origination && alembic upgrade head`
-- migrate ledger: `cd services/ledger && alembic upgrade head`
-- test (origination — the only service with tests): `cd services/origination && pytest tests/ -v`
-- single test: `cd services/origination && pytest tests/test_routes.py::test_idempotency -v`
+- migrate: `cd services/core-api && alembic upgrade head`
+- test: `cd services/core-api && pytest tests/ -v`
+- single test: `cd services/core-api && pytest tests/test_routes.py::test_document_crud_happy_path -v`
 - lint: `ruff check .` (also runs as the PostToolUse hook in `.claude/settings.json`)
 - typecheck: none configured — no mypy/pyright in this repo
 
 ## Conventions
-- Flat per-service modules (`routes.py`, `models.py`, `database.py`, `base.py`, `main.py`) — no `src/` layout, no package `__init__.py`. Imports are bare (`from routes import router`), so they only resolve when the service directory is the CWD (matches Docker's `WORKDIR /app` and `cd services/<service>` before running locally)
-- Each service owns its own FastAPI app, models, and Alembic migration chain, fully independent of the other
-- Every model subclasses that service's local `base.Base` (`DeclarativeBase`) — there is no shared base between services
-- DB access goes through a `get_db()` async generator yielding `AsyncSessionLocal()`, injected via FastAPI `Depends`
+- Flat modules (`routes.py`, `models.py`, `database.py`, `identity.py`, `base.py`, `main.py`) — no `src/` layout, no package `__init__.py`. Imports are bare (`from routes import router`), so they only resolve when `services/core-api` is the CWD (matches Docker's `WORKDIR /app` and `cd services/core-api` before running locally)
+- Every model subclasses the local `base.Base` (`DeclarativeBase`)
+- DB access goes through a `get_db()` async generator (in `database.py`) yielding `AsyncSessionLocal()`, injected via FastAPI `Depends` — both `routes.py` and `identity.py` import the same `get_db`, so tests only need to override it in one place
+- Identity is a plain `X-User-Id` header, no auth system: `identity.get_current_user` looks the id up in `users` and 401s if it's missing or unknown
 - Config is read with `os.getenv(...)` and a localhost default, not a settings module
 - New async tests need an explicit `@pytest.mark.asyncio` decorator — `asyncio_mode=auto` is not configured
 
 ## Invariants (never violate)
-- Origination and Ledger share one Postgres database (`creditcore`). Ledger's Alembic env overrides `version_table="alembic_version_ledger"` specifically so its migration history doesn't collide with Origination's default `alembic_version` table — don't remove that override or point both at the same version table
-- `POST /applications` idempotency depends on the unique `idempotency_key` column: a duplicate key must return the existing row, never create a second one
-- Every loan submission must produce a matching debit + credit `LedgerEntry` pair (double-entry bookkeeping) — never write one leg without the other
+- Ownership checks on `documents`, `quizzes`, and `quiz_attempts` always return **404**, never 403, when a resource exists but isn't the caller's — a resource the caller doesn't own must be indistinguishable from one that doesn't exist
+- `quizzes` are reachable only through the `documents` they belong to (`quizzes.document_id → documents.user_id`), and `quiz_attempts` only through the `quizzes` they belong to — every quiz/quiz_attempt endpoint must join back to `documents.user_id` to authorize, not just check the immediate FK
+- `quiz_attempts.quiz_id` and `quiz_attempts.user_id` are `ON DELETE RESTRICT`, not `CASCADE` — score history must survive a quiz or user deletion attempt (the delete fails at the DB level instead)
 
 ## Tool routing
 - Before creating any new function or utility: query codegraph — does it already exist?
@@ -46,12 +44,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Decisions: `docs/adr/` — read before refactoring anything structural
 - Architecture map: `docs/architecture.md` (regenerate with /arch)
 - Blast-radius snapshots: `docs/blast/`
-- Module intent: `services/<service>/README.md` (none exist yet — this repo's README.md at the root is currently the only architecture writeup)
+- Module intent: `services/core-api/README.md` (doesn't exist yet — this repo's README.md at the root is currently the only architecture writeup)
 
 ## Gotchas
-- **Kafka does not connect Origination and Ledger, despite what the README's diagram shows.** Ledger has zero Kafka code or dependency. Origination publishes `loan.submitted` and also consumes it itself (`group_id="origination-group"`), but the consumer only logs the message — it doesn't call Ledger. Ledger entries are created solely by direct `POST /postings` calls. Don't assume the event wires anything together; see `docs/architecture.md` for the verified data flow
-- `services/origination/migrations/env.py` has an `include_object` filter that excludes every table except `"ledger_entries"` — this appears copy-pasted from the ledger service and will silently drop `loan_applications` from `alembic revision --autogenerate` in origination. Fix or remove before relying on autogenerate there
-- Only origination has tests (`services/origination/tests/test_routes.py`); ledger has zero coverage
-- Tests hit a real Postgres (`postgresql+asyncpg://creditcore:creditcore@localhost:5432/creditcore`), not a mock or isolated test DB — `postgres` (at least) must be running via `make up`/`docker-compose up` for `pytest` to pass, and there's no rollback between tests
-- `ruff check .` currently reports 5 pre-existing `F401` unused-import findings (e.g. unused `base.Base` imports in both `database.py` files, unused model imports in both `migrations/env.py` files) — the new PostToolUse hook will surface these on unrelated edits to those files
+- Only one service exists (`services/core-api`) — there is no second service or shared-DB migration-table split to worry about anymore
+- Tests hit a real Postgres (`postgresql+asyncpg://edumind:edumind@localhost:5432/edumind`), not a mock or isolated test DB — `postgres` (at least) must be running via `make up`/`docker-compose up` for `pytest` to pass, and there's no rollback between tests; seeded test users (`alice@edumind.test` / `bob@edumind.test`, fixed UUIDs, see the seed migration) are expected to already exist
+- `ruff check .` reports pre-existing `F401` unused-import findings: `base.Base` in `database.py` (imported for side effects, not directly referenced), and the `User`/`Document`/`Quiz`/`QuizAttempt` imports in `migrations/env.py` (imported so `Base.metadata` picks them up for autogenerate, not directly referenced) — the PostToolUse hook will surface these on unrelated edits to those files
 - No mypy/pyright configured — nothing enforces the `Mapped[...]` type annotations beyond what SQLAlchemy itself checks at runtime
