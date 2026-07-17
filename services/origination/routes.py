@@ -6,7 +6,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from worker import run_credit_check, celery_app
 from celery.result import AsyncResult
-from kafka_producer import publish_event
 from logger import log
 
 router = APIRouter()
@@ -67,13 +66,6 @@ async def submit_application(app_id: str, db: AsyncSession = Depends(get_db)):
     application.status = LoanStatus.SUBMITTED
     await db.commit()
     await db.refresh(application)
-
-    # Publish event to Kafka
-    await publish_event("loan.submitted", {
-        "loan_id": str(application.id),
-        "customer_id": application.customer_id,
-        "amount": application.amount
-    })
 
     # Fire background job - don't wait for it
     task = run_credit_check.delay(str(application.id), application.customer_id)

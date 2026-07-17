@@ -7,7 +7,6 @@ A minimal project to refresh hands-on familiarity with backend infrastructure in
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-4169E1?style=flat&logo=postgresql&logoColor=white)
 ![Redis](https://img.shields.io/badge/Redis-DC382D?style=flat&logo=redis&logoColor=white)
 ![Celery](https://img.shields.io/badge/Celery-37814A?style=flat&logo=celery&logoColor=white)
-![Kafka](https://img.shields.io/badge/Kafka-231F20?style=flat&logo=apachekafka&logoColor=white)
 ![Prometheus](https://img.shields.io/badge/Prometheus-E6522C?style=flat&logo=prometheus&logoColor=white)
 ![Grafana](https://img.shields.io/badge/Grafana-F46800?style=flat&logo=grafana&logoColor=white)
 ![Docker](https://img.shields.io/badge/Docker-2496ED?style=flat&logo=docker&logoColor=white)
@@ -25,8 +24,7 @@ flowchart TD
             Ledger["Ledger\nFastAPI · port 8001\nDouble-entry bookkeeping"]
         end
 
-        subgraph Messaging ["Async / Events"]
-            Kafka[/"Kafka\nKRaft · port 9092\ntopic: loan.submitted"/]
+        subgraph Messaging ["Async Jobs"]
             Redis[("Redis\nport 6379 · broker")]
             Celery["Celery Worker\ncredit check jobs"]
         end
@@ -43,9 +41,6 @@ flowchart TD
 
     Client -->|HTTP| Orig
     Client -->|HTTP| Ledger
-
-    Orig -->|publishes loan.submitted| Kafka
-    Kafka -.->|consumes| Ledger
 
     Orig -->|SQL| PG
     Ledger -->|SQL| PG
@@ -67,7 +62,6 @@ flowchart TD
 - **PostgreSQL** — primary database
 - **SQLAlchemy + Alembic** — ORM and migrations
 - **Redis + Celery** — async background jobs
-- **Kafka** — event publishing and consumption
 - **structlog** — structured JSON logging
 - **Prometheus** — metrics scraping
 - **Grafana** — metrics visualisation
@@ -161,10 +155,9 @@ Both services expose a /metrics endpoint scraped by Prometheus every 15s. Open G
 - Submitting a loan application enqueues an async credit check job.
 - The worker processes it in the background and updates the application status — decoupling slow operations from the request lifecycle.
 
-### Phase 5 — Kafka
-- Added Kafka (KRaft mode, no Zookeeper) for event-driven communication.
-- Origination publishes a `loan.submitted` event on application submission.
-- Ledger consumes it via an async Kafka consumer running as a background task on startup.
+### Phase 5 — Kafka (removed)
+- Kafka (KRaft mode) previously carried a `loan.submitted` event from Origination, consumed by an async background task in the same service — it never actually reached Ledger.
+- Removed entirely. Origination→Ledger communication will be replaced with direct REST/gRPC calls (coming next).
 
 ### Phase 6 — Ledger Service
 - Built a second microservice for double-entry bookkeeping.
@@ -173,7 +166,7 @@ Both services expose a /metrics endpoint scraped by Prometheus every 15s. Open G
 
 ### Phase 7 — Docker
 - Containerised all services with individual Dockerfiles.
-- `docker-compose.yml` orchestrates Origination, Ledger, Celery worker, PostgreSQL, Redis, and Kafka with healthchecks and dependency ordering. - A `Makefile` wraps common commands (`make up`, `make down`, `make logs`).
+- `docker-compose.yml` orchestrates Origination, Ledger, Celery worker, PostgreSQL, and Redis with healthchecks and dependency ordering. - A `Makefile` wraps common commands (`make up`, `make down`, `make logs`).
 
 ### Phase 8 — Observability
 - Added `prometheus-fastapi-instrumentator` to both services to expose a `/metrics` endpoint.
