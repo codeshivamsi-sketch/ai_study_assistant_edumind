@@ -1,0 +1,8 @@
+services/notifications/node_modules
+services/notifications/dist
+services/notifications/proto
+**/.env
+services/core-api/__pycache__
+services/core-api/.pytest_cache
+services/core-api/notifications_pb2.py
+services/core-api/notifications_pb2_grpc.py
