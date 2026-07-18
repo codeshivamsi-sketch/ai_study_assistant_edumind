@@ -3,6 +3,7 @@ from sqlalchemy.orm import sessionmaker
 from main import app
 from database import get_db
 import pytest
+import grpc
 from httpx import AsyncClient, ASGITransport
 
 DATABASE_URL = "postgresql+asyncpg://edumind:edumind@localhost:5432/edumind"
@@ -85,6 +86,38 @@ async def test_quiz_crud_happy_path():
 
         delete_response = await client.delete(f"/quizzes/{quiz['id']}", headers=auth(ALICE_ID))
         assert delete_response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_create_quiz_calls_notify_quiz_ready(monkeypatch):
+    called = {}
+
+    def fake_notify_quiz_ready(user_id, quiz_id):
+        called["user_id"] = user_id
+        called["quiz_id"] = quiz_id
+
+    monkeypatch.setattr("routes.notify_quiz_ready", fake_notify_quiz_ready)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        document = await create_document(client, ALICE_ID, "Notify notes")
+        quiz = await create_quiz(client, ALICE_ID, document["id"], "Notify quiz")
+
+    assert called["user_id"] == ALICE_ID
+    assert called["quiz_id"] == quiz["id"]
+
+
+@pytest.mark.asyncio
+async def test_create_quiz_succeeds_even_when_notify_quiz_ready_raises(monkeypatch):
+    def failing_notify_quiz_ready(user_id, quiz_id):
+        raise grpc.RpcError("simulated failure")
+
+    monkeypatch.setattr("routes.notify_quiz_ready", failing_notify_quiz_ready)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        document = await create_document(client, ALICE_ID, "Resilience notes")
+        quiz = await create_quiz(client, ALICE_ID, document["id"], "Resilience quiz")
+
+    assert quiz["topic"] == "Resilience quiz"
 
 
 @pytest.mark.asyncio
