@@ -3,6 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from pydantic import BaseModel
 from typing import Any, Optional
+import asyncio
 import uuid
 
 from database import get_db
@@ -116,7 +117,7 @@ async def create_quiz(
     await db.commit()
     await db.refresh(quiz)
     try:
-        notify_quiz_ready(str(user.id), str(quiz.id))
+        await asyncio.to_thread(notify_quiz_ready, str(user.id), str(quiz.id))
     except grpc.RpcError as e:
         log.warning("notify_quiz_ready_failed", quiz_id=str(quiz.id), error=str(e))
     return quiz
