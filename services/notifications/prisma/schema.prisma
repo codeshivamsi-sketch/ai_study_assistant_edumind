@@ -1,7 +1,9 @@
 // This schema owns ONLY the `notifications` table. Do not add a `User`
 // model or any relation into `users` — that table belongs to core-api's
-// Alembic migrations. Never run `prisma migrate reset` or `prisma db pull`
-// against this database; both would destroy or corrupt Alembic's tables.
+// Alembic migrations. Never run `prisma migrate reset`, `prisma db pull`,
+// or `prisma migrate dev` (even with `--create-only`) against this
+// database; `migrate dev` triggers destructive drift-detection resets,
+// and reset/db pull would destroy or corrupt Alembic's tables.
 
 generator client {
   provider = "prisma-client-js"

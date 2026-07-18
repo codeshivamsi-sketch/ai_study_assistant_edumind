@@ -1,7 +1,8 @@
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import Fastify from "fastify";
 import { requireUser } from "../src/identity";
+import { prisma } from "../src/db";
 
 const ALICE_ID = "11111111-1111-1111-1111-111111111111";
 const UNKNOWN_ID = "99999999-9999-9999-9999-999999999999";
@@ -48,4 +49,8 @@ test("requireUser returns 401 for a malformed user id", async () => {
     headers: { "x-user-id": "not-a-uuid" },
   });
   assert.equal(response.statusCode, 401);
+});
+
+after(async () => {
+  await prisma.$disconnect();
 });
