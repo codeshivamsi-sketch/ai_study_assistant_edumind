@@ -21,7 +21,9 @@ services:
       - "6379:6379"
 
   core-api:
-    build: ./services/core-api
+    build:
+      context: .
+      dockerfile: services/core-api/Dockerfile
     ports:
       - "8000:8000"
     depends_on:
@@ -32,11 +34,14 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://edumind:edumind@postgres:5432/edumind
       REDIS_URL: redis://redis:6379/0
+      NOTIFICATIONS_GRPC_URL: notifications:5001
     command: >
       sh -c "alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port 8000"
 
   worker:
-    build: ./services/core-api
+    build:
+      context: .
+      dockerfile: services/core-api/Dockerfile
     depends_on:
       - redis
       - postgres
@@ -44,6 +49,24 @@ services:
       DATABASE_URL: postgresql+asyncpg://edumind:edumind@postgres:5432/edumind
       REDIS_URL: redis://redis:6379/0
     command: celery -A worker worker --loglevel=info
+
+  notifications:
+    build:
+      context: .
+      dockerfile: services/notifications/Dockerfile
+    ports:
+      - "5000:5000"
+      - "5001:5001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    environment:
+      DATABASE_URL: postgresql://edumind:edumind@postgres:5432/edumind
+      REDIS_URL: redis://redis:6379/1
+      HTTP_PORT: "5000"
+      GRPC_PORT: "5001"
 
   prometheus:
     image: prom/prometheus:latest
