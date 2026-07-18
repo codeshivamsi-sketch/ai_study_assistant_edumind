@@ -5,7 +5,6 @@ import { prisma } from "./db";
 import { enqueueNotifyQuizReady } from "./queue";
 
 const createNotificationSchema = z.object({
-  user_id: z.string().uuid(),
   quiz_id: z.string().uuid(),
   message: z.string().min(1),
 });
@@ -19,7 +18,7 @@ export async function registerRoutes(app: FastifyInstance) {
 
   app.post("/notifications", async (request, reply) => {
     const body = createNotificationSchema.parse(request.body);
-    await enqueueNotifyQuizReady(body);
+    await enqueueNotifyQuizReady({ ...body, user_id: request.user!.id });
     return reply.code(202).send({ enqueued: true });
   });
 
