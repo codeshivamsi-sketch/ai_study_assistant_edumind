@@ -82,4 +82,54 @@ erDiagram
     }
 ```
 
+## Request Flow — POST /quizzes
+
+Saved on 2026-07-20 via `/arch sequence POST /quizzes` (on-demand trace, hand-saved to this file on request — a plain `/arch` re-run will overwrite the two sections above but has no mechanism to preserve this one; re-save it after any future `/arch` run if you want it kept).
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant API as core-api port 8000
+    participant PG as Postgres edumind
+    participant R as Redis
+    participant W as Celery worker
+    participant N as notifications gRPC port 5001
+    participant NQ as notifications BullMQ worker
+
+    rect rgb(230, 245, 255)
+    Note over C,PG: Synchronous request, client waits for this
+    C->>API: POST /quizzes document_id topic questions, X-User-Id alice
+    API->>PG: SELECT users WHERE id = X-User-Id
+    PG-->>API: user row, 401 if missing or unknown
+    API->>PG: SELECT documents WHERE id=? AND user_id=?
+    PG-->>API: document row, 404 if not owned
+    API->>PG: INSERT INTO quizzes, COMMIT
+    PG-->>API: quiz row
+    API->>R: send_task notify_quiz_ready user_id quiz_id
+    Note right of API: best-effort, failure here is logged,<br/>never fails the response
+    API-->>C: 200 quiz
+    end
+
+    rect rgb(255, 245, 230)
+    Note over R,N: Async, happens after the client already has its response
+    W->>R: consume notify_quiz_ready task, broker db 0
+    W->>N: gRPC NotifyQuizReady user_id quiz_id
+    N->>R: enqueue BullMQ job NotifyQuizReady, db 1
+    N-->>W: accepted true
+    Note right of W: on failure worker retries up to 3x, 60s apart
+    NQ->>R: consume BullMQ job, db 1
+    NQ->>PG: INSERT INTO notifications
+    end
+
+    rect rgb(235, 255, 235)
+    Note over C,PG: Client fetches it later, no push, client must GET
+    C->>N: GET /notifications user_id=alice, X-User-Id alice
+    N->>PG: SELECT users WHERE id = X-User-Id
+    PG-->>N: user row, 401 if missing or unknown
+    N->>PG: SELECT notifications WHERE user_id=?
+    PG-->>N: notification rows
+    N-->>C: 200 notifications list
+    end
+```
+
 For a single endpoint's call trace, run `/arch show flow [endpoint]` (mindmap of calls). For its sequence diagram, run `/arch sequence [endpoint]`.
