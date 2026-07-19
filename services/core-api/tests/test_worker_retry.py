@@ -6,7 +6,11 @@ ALICE_ID = "11111111-1111-1111-1111-111111111111"
 
 
 def test_notify_quiz_ready_retries_then_fails():
-    task = celery_app.send_task("notify_quiz_ready", args=[ALICE_ID, "22222222-2222-2222-2222-222222222222"])
+    task = celery_app.send_task(
+        "notify_quiz_ready",
+        args=[ALICE_ID, "22222222-2222-2222-2222-222222222222"],
+        queue="notify_quiz_ready_retry_test",
+    )
     result = AsyncResult(task.id, app=celery_app)
 
     start = time.monotonic()
