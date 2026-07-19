@@ -324,7 +324,17 @@ ALICE_ID = "11111111-1111-1111-1111-111111111111"
 
 
 def test_notify_quiz_ready_retries_then_fails():
-    task = celery_app.send_task("notify_quiz_ready", args=[ALICE_ID, "22222222-2222-2222-2222-222222222222"])
+    # Routed to a dedicated queue so this test's dispatch can never be
+    # picked up by the always-running docker-compose `worker` container
+    # (which listens on the default queue and points at a reachable
+    # notifications service — it would race this test's dedicated worker
+    # and could succeed the task before the fake-unreachable-target retry
+    # cycle ever runs).
+    task = celery_app.send_task(
+        "notify_quiz_ready",
+        args=[ALICE_ID, "22222222-2222-2222-2222-222222222222"],
+        queue="notify_quiz_ready_retry_test",
+    )
     result = AsyncResult(task.id, app=celery_app)
 
     start = time.monotonic()
@@ -346,6 +356,11 @@ def test_notify_quiz_ready_retries_then_fails():
 `--pool=solo` keeps the worker single-process — the default prefork pool
 forks child processes that `kill $WORKER_PID` below would not reach,
 leaving orphaned workers holding Redis connections after the test.
+`-Q notify_quiz_ready_retry_test` (matching the test's `queue=` above)
+means this worker only consumes from that dedicated queue — the
+docker-compose `worker` container (default queue, reachable
+`notifications`) is never a competing consumer, so there's no need to stop
+it before running this test or restart it after.
 
 ```bash
 cd services/core-api
@@ -354,7 +369,7 @@ export DATABASE_URL="postgresql+asyncpg://edumind:edumind@localhost:5432/edumind
 export REDIS_URL="redis://localhost:6379/0"
 export NOTIFICATIONS_GRPC_URL="localhost:59999"
 export NOTIFY_QUIZ_READY_RETRY_COUNTDOWN="1"
-celery -A worker worker --loglevel=info --pool=solo &
+celery -A worker worker --loglevel=info --pool=solo -Q notify_quiz_ready_retry_test &
 WORKER_PID=$!
 sleep 3
 python -m pytest tests/test_worker_retry.py -v
