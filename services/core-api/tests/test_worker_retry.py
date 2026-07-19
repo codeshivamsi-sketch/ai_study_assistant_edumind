@@ -24,4 +24,4 @@ def test_notify_quiz_ready_retries_then_fails():
     # 3 retries at ~1s each (NOTIFY_QUIZ_READY_RETRY_COUNTDOWN=1 in this
     # test's worker env) — proves the retry loop actually ran more than
     # once, not that it failed immediately on the first attempt.
-    assert elapsed >= 2, f"expected at least ~3s of retries, only took {elapsed:.1f}s"
+    assert elapsed >= 2.5, f"expected at least ~3s of retries, only took {elapsed:.1f}s"
