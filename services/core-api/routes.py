@@ -3,15 +3,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from pydantic import BaseModel
 from typing import Any, Optional
-import asyncio
 import uuid
 
 from database import get_db
 from identity import get_current_user
 from models import User, Document, Quiz, QuizAttempt
 from logger import log
-import grpc
-from grpc_client import notify_quiz_ready
+from worker import celery_app
 
 router = APIRouter()
 
@@ -117,9 +115,9 @@ async def create_quiz(
     await db.commit()
     await db.refresh(quiz)
     try:
-        await asyncio.to_thread(notify_quiz_ready, str(user.id), str(quiz.id))
-    except grpc.RpcError as e:
-        log.warning("notify_quiz_ready_failed", quiz_id=str(quiz.id), error=str(e))
+        celery_app.send_task("notify_quiz_ready", args=[str(user.id), str(quiz.id)])
+    except Exception as e:
+        log.warning("notify_quiz_ready_dispatch_failed", quiz_id=str(quiz.id), error=str(e))
     return quiz
 
 @router.get("/quizzes")

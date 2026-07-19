@@ -3,7 +3,6 @@ from sqlalchemy.orm import sessionmaker
 from main import app
 from database import get_db
 import pytest
-import grpc
 from httpx import AsyncClient, ASGITransport
 
 DATABASE_URL = "postgresql+asyncpg://edumind:edumind@localhost:5432/edumind"
@@ -89,29 +88,29 @@ async def test_quiz_crud_happy_path():
 
 
 @pytest.mark.asyncio
-async def test_create_quiz_calls_notify_quiz_ready(monkeypatch):
-    called = {}
+async def test_create_quiz_dispatches_notify_quiz_ready_task(monkeypatch):
+    dispatched = {}
 
-    def fake_notify_quiz_ready(user_id, quiz_id):
-        called["user_id"] = user_id
-        called["quiz_id"] = quiz_id
+    def fake_send_task(name, args=None, **kwargs):
+        dispatched["name"] = name
+        dispatched["args"] = args
 
-    monkeypatch.setattr("routes.notify_quiz_ready", fake_notify_quiz_ready)
+    monkeypatch.setattr("routes.celery_app.send_task", fake_send_task)
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         document = await create_document(client, ALICE_ID, "Notify notes")
         quiz = await create_quiz(client, ALICE_ID, document["id"], "Notify quiz")
 
-    assert called["user_id"] == ALICE_ID
-    assert called["quiz_id"] == quiz["id"]
+    assert dispatched["name"] == "notify_quiz_ready"
+    assert dispatched["args"] == [ALICE_ID, quiz["id"]]
 
 
 @pytest.mark.asyncio
-async def test_create_quiz_succeeds_even_when_notify_quiz_ready_raises(monkeypatch):
-    def failing_notify_quiz_ready(user_id, quiz_id):
-        raise grpc.RpcError("simulated failure")
+async def test_create_quiz_succeeds_even_when_task_dispatch_fails(monkeypatch):
+    def failing_send_task(name, args=None, **kwargs):
+        raise ConnectionError("simulated broker failure")
 
-    monkeypatch.setattr("routes.notify_quiz_ready", failing_notify_quiz_ready)
+    monkeypatch.setattr("routes.celery_app.send_task", failing_send_task)
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         document = await create_document(client, ALICE_ID, "Resilience notes")
