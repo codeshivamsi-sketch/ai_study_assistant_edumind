@@ -1,0 +1,14 @@
+import os
+import httpx
+
+AGENTIC_SERVICE_URL = os.getenv("AGENTIC_SERVICE_URL", "http://localhost:8002")
+
+
+async def upload_document(document_id: str, filename: str, content: bytes) -> None:
+    async with httpx.AsyncClient(timeout=120) as client:
+        response = await client.post(
+            f"{AGENTIC_SERVICE_URL}/upload",
+            files={"file": (filename, content, "application/pdf")},
+            data={"document_id": document_id},
+        )
+        response.raise_for_status()

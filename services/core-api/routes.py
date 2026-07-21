@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from pydantic import BaseModel
@@ -10,6 +10,7 @@ from identity import get_current_user
 from models import User, Document, Quiz, QuizAttempt
 from logger import log
 from worker import celery_app
+from agentic_client import upload_document
 
 router = APIRouter()
 
@@ -80,6 +81,30 @@ async def delete_document(
     await db.delete(document)
     await db.commit()
     return {"deleted": True}
+
+@router.post("/documents/{document_id}/upload")
+async def upload_document_file(
+    document_id: uuid.UUID,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    document = await _get_owned_document(document_id, user, db)
+    content = await file.read()
+    document.status = "processing"
+    await db.commit()
+    try:
+        await upload_document(str(document_id), file.filename, content)
+    except Exception as e:
+        document.status = "failed"
+        await db.commit()
+        log.warning("document_upload_failed", document_id=str(document_id), error=str(e))
+        raise HTTPException(status_code=502, detail="Document ingestion failed")
+    document.status = "ready"
+    await db.commit()
+    await db.refresh(document)
+    log.info("document_uploaded", document_id=str(document_id))
+    return document
 
 # ---- Quizzes ----
 
