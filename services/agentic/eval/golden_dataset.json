@@ -1,0 +1,119 @@
+[
+    {
+      "question": "What is machine learning?",
+      "ground_truth": "Machine learning is a subset of artificial intelligence that enables systems to learn and improve from experience without being explicitly programmed. The core idea is to give machines access to data and let them learn for themselves."
+    },
+    {
+      "question": "What are the three types of machine learning?",
+      "ground_truth": "The three types are: Supervised Learning (uses labeled training data to learn a mapping from inputs to outputs), Unsupervised Learning (finds hidden patterns in data without labeled responses), and Reinforcement Learning (learns by interacting with environment and receiving rewards or penalties)."
+    },
+    {
+      "question": "What is a neural network?",
+      "ground_truth": "A neural network is a series of algorithms that endeavors to recognize underlying relationships in a set of data through a process that mimics the way the human brain operates. Artificial neural networks are comprised of node layers, containing an input layer, one or more hidden layers, and an output layer."
+    },
+    {
+      "question": "What are activation functions in neural networks?",
+      "ground_truth": "Activation functions introduce non-linearity into neural networks. Common ones are ReLU, Sigmoid, and Tanh."
+    },
+    {
+      "question": "What is NLP?",
+      "ground_truth": "Natural Language Processing (NLP) is a branch of artificial intelligence that helps computers understand, interpret, and manipulate human language. It combines computational linguistics with statistical, machine learning, and deep learning models."
+    },
+    {
+      "question": "What is tokenization?",
+      "ground_truth": "Tokenization is the process of breaking text into words or subwords."
+    },
+    {
+      "question": "What are embeddings?",
+      "ground_truth": "Embeddings are dense numerical representations of text, images, or other data. In NLP, an embedding model converts a sentence or paragraph into a fixed-size vector such that semantically similar texts have vectors close together in the embedding space."
+    },
+    {
+      "question": "What are Large Language Models?",
+      "ground_truth": "Large Language Models (LLMs) are deep learning models trained on massive text datasets. They can generate text, answer questions, summarize content, translate languages, and perform many other language tasks. LLMs like GPT-4 and Claude are trained on hundreds of billions of parameters."
+    },
+    {
+      "question": "What is the transformer architecture?",
+      "ground_truth": "The transformer architecture was introduced in the paper 'Attention Is All You Need' (2017) and is the foundation of modern LLMs. These models learn statistical patterns from vast corpora of text and can generalize to perform tasks they were not explicitly trained on."
+    },
+    {
+      "question": "What is prompt engineering?",
+      "ground_truth": "Prompt engineering is the practice of crafting inputs to guide model outputs effectively."
+    },
+    {
+      "question": "What is RAG?",
+      "ground_truth": "Retrieval Augmented Generation (RAG) is a technique that enhances LLM responses by grounding them in external knowledge. Instead of relying solely on the model's training data, RAG retrieves relevant documents from a knowledge base and passes them as context to the LLM."
+    },
+    {
+      "question": "What two problems does RAG solve?",
+      "ground_truth": "RAG solves hallucination (models generating false information) and knowledge cutoff (models not knowing recent events)."
+    },
+    {
+      "question": "What is chunking in RAG?",
+      "ground_truth": "Chunking is the process of splitting documents into smaller pieces for efficient retrieval in a RAG pipeline."
+    },
+    {
+      "question": "What is a vector database?",
+      "ground_truth": "Vector databases are purpose-built databases that store and query high-dimensional vectors efficiently. Unlike traditional databases that search by exact match, vector databases perform similarity search — finding vectors that are closest to a query vector in high-dimensional space."
+    },
+    {
+      "question": "What is cosine similarity?",
+      "ground_truth": "Cosine similarity measures the angle between vectors, with a range of -1 to 1. It is used as a distance metric in vector databases to find similar embeddings."
+    },
+    {
+      "question": "What is Chroma?",
+      "ground_truth": "Chroma is an open-source local vector database, ideal for development."
+    },
+    {
+      "question": "What is Pinecone?",
+      "ground_truth": "Pinecone is a managed cloud vector database designed for production workloads."
+    },
+    {
+      "question": "What is semantic search?",
+      "ground_truth": "Semantic search is finding content by meaning rather than keyword matching. It uses embeddings where semantically similar texts have vectors close together in the embedding space."
+    },
+    {
+      "question": "What is an AI agent?",
+      "ground_truth": "AI agents are LLM-powered systems that can take actions in the world — browsing the web, running code, querying databases, or calling APIs. An agent has a loop: it perceives its environment, decides on an action, executes it, observes the result, and repeats until the task is done."
+    },
+    {
+      "question": "What is the ReAct pattern?",
+      "ground_truth": "ReAct stands for Reasoning + Acting — the agent thinks step by step before taking an action."
+    },
+    {
+      "question": "What is human-in-the-loop?",
+      "ground_truth": "Human-in-the-loop refers to pausing agent execution for human approval or input before continuing."
+    },
+    {
+      "question": "What is RAGAs?",
+      "ground_truth": "RAGAs is a framework specifically designed to evaluate RAG pipelines across metrics like faithfulness (is the answer grounded in the context?), answer relevance (does it address the question?), and context precision/recall."
+    },
+    {
+      "question": "What is faithfulness in RAG evaluation?",
+      "ground_truth": "Faithfulness measures whether the answer is supported by the retrieved context."
+    },
+    {
+      "question": "What is context recall in RAG evaluation?",
+      "ground_truth": "Context recall measures whether all necessary documents were retrieved."
+    },
+    {
+      "question": "What is LangSmith?",
+      "ground_truth": "LangSmith provides observability for LLM applications — tracing every LLM call, tool invocation, and agent step with latency and cost metrics."
+    },
+    {
+      "question": "What is fine-tuning?",
+      "ground_truth": "Fine-tuning is the process of adapting a pre-trained model to a specific task or domain."
+    },
+    {
+      "question": "What is zero-shot learning?",
+      "ground_truth": "Zero-shot learning is the ability of LLMs to perform tasks they were not explicitly trained on without any examples."
+    },
+    {
+      "question": "What is Docker Compose?",
+      "ground_truth": "Docker Compose orchestrates multiple containers as a single application."
+    },
+    {
+      "question": "What is MCP?",
+      "ground_truth": "The Model Context Protocol (MCP) is an open standard by Anthropic that allows Claude Desktop and other LLM clients to connect to external tools and data sources through a standardized interface."
+    }
+  ]
+  

@@ -231,3 +231,8 @@ services/notifications/node_modules/
 services/notifications/dist/
 services/notifications/proto/
 services/notifications/generated/
+
+# Agentic service (services/agentic) - runtime state, not source
+services/agentic/chroma_db/
+services/agentic/checkpoints.db
+services/agentic/uploads/*
