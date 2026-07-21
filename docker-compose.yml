@@ -35,6 +35,7 @@ services:
       DATABASE_URL: postgresql+asyncpg://edumind:edumind@postgres:5432/edumind
       REDIS_URL: redis://redis:6379/0
       NOTIFICATIONS_GRPC_URL: notifications:5001
+      AGENTIC_SERVICE_URL: http://agentic:8000
     command: >
       sh -c "alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port 8000"
 
@@ -69,6 +70,35 @@ services:
       HTTP_PORT: "5000"
       GRPC_PORT: "5001"
 
+  neo4j:
+    image: neo4j:latest
+    ports:
+      - "7475:7474"
+      - "7688:7687"
+    environment:
+      NEO4J_AUTH: neo4j/password
+    volumes:
+      - neo4j_data:/data
+
+  agentic:
+    build: ./services/agentic
+    ports:
+      - "8002:8000"
+    environment:
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      NEO4J_URI: bolt://neo4j:7687
+      NEO4J_USER: neo4j
+      NEO4J_PASSWORD: password
+      LANGCHAIN_API_KEY: ${LANGCHAIN_API_KEY}
+      LANGCHAIN_TRACING_V2: ${LANGCHAIN_TRACING_V2}
+      LANGCHAIN_PROJECT: ${LANGCHAIN_PROJECT}
+    depends_on:
+      - neo4j
+    volumes:
+      - agentic_chroma:/app/chroma_db
+      - agentic_checkpoints:/app/checkpoints.db
+      - agentic_uploads:/app/uploads
+
   prometheus:
     image: prom/prometheus:latest
     volumes:
@@ -84,3 +114,9 @@ services:
       GF_SECURITY_ADMIN_PASSWORD: admin
     depends_on:
       - prometheus
+
+volumes:
+  neo4j_data:
+  agentic_chroma:
+  agentic_checkpoints:
+  agentic_uploads:
