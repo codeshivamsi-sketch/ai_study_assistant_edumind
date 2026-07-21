@@ -524,8 +524,9 @@ httpx.AsyncClient is true async I/O and doesn't block the event loop."
 
 **Interfaces:**
 - Consumes: `celery_app` (existing, `worker.py`), `Quiz` model (existing,
-  `models.py`), `AsyncSessionLocal` (existing, `database.py`),
-  `_get_owned_document` (existing, `routes.py`).
+  `models.py`), `DATABASE_URL` (existing, `database.py` — a fresh engine is
+  created per call from this, not the shared `AsyncSessionLocal`; see Step
+  4's note on why), `_get_owned_document` (existing, `routes.py`).
 - Produces: Celery task `generate_quiz(self, user_id, document_id, topic)`
   registered as `name="generate_quiz"`; `agentic_client.request_quiz(document_id:
   str, topic: str) -> list`.
@@ -554,8 +555,10 @@ import asyncio
 
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+from sqlalchemy.orm import sessionmaker
 
-from database import AsyncSessionLocal
+from database import DATABASE_URL
 from main import app
 from models import Quiz
 from worker import generate_quiz
@@ -578,9 +581,18 @@ async def _create_ready_document() -> str:
 
 
 async def _fetch_quiz(document_id: str):
-    async with AsyncSessionLocal() as session:
-        result = await session.execute(select(Quiz).where(Quiz.document_id == document_id))
-        return result.scalar_one_or_none()
+    # Fresh engine per call, same reason as worker.py's _insert_quiz and
+    # test_routes.py's own override_get_db: asyncio.run() gives this a new
+    # event loop each time, and a shared/imported engine's pooled
+    # connections would be bound to whatever loop touched them first.
+    engine = create_async_engine(DATABASE_URL)
+    SessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    try:
+        async with SessionLocal() as session:
+            result = await session.execute(select(Quiz).where(Quiz.document_id == document_id))
+            return result.scalar_one_or_none()
+    finally:
+        await engine.dispose()
 
 
 def test_generate_quiz_inserts_quiz_and_dispatches_notify(monkeypatch):
@@ -627,9 +639,11 @@ import asyncio
 import os
 
 from celery import Celery
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+from sqlalchemy.orm import sessionmaker
 
 from agentic_client import request_quiz
-from database import AsyncSessionLocal
+from database import DATABASE_URL
 from grpc_client import notify_quiz_ready as send_grpc_notification
 from logger import log
 from models import Quiz
@@ -654,12 +668,25 @@ def notify_quiz_ready(self, user_id, quiz_id):
 
 
 async def _insert_quiz(document_id: str, topic: str, questions: list) -> str:
-    async with AsyncSessionLocal() as session:
-        quiz = Quiz(document_id=document_id, topic=topic, questions=questions)
-        session.add(quiz)
-        await session.commit()
-        await session.refresh(quiz)
-        return str(quiz.id)
+    # A fresh engine per call, not database.py's shared AsyncSessionLocal:
+    # asyncio.run() (see generate_quiz below) gives this coroutine a
+    # brand-new event loop every invocation, but the shared engine's
+    # asyncpg connection pool binds connections to whichever loop created
+    # them -- reusing it across separate asyncio.run() calls raises
+    # "attached to a different loop"/"another operation is in progress".
+    # Creating and disposing the engine within this one call's own loop
+    # sidesteps that entirely.
+    engine = create_async_engine(DATABASE_URL, echo=False)
+    SessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    try:
+        async with SessionLocal() as session:
+            quiz = Quiz(document_id=document_id, topic=topic, questions=questions)
+            session.add(quiz)
+            await session.commit()
+            await session.refresh(quiz)
+            return str(quiz.id)
+    finally:
+        await engine.dispose()
 
 
 @celery_app.task(bind=True, max_retries=2, name="generate_quiz")
