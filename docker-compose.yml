@@ -50,6 +50,7 @@ services:
       DATABASE_URL: postgresql+asyncpg://edumind:edumind@postgres:5432/edumind
       REDIS_URL: redis://redis:6379/0
       NOTIFICATIONS_GRPC_URL: notifications:5001
+      AGENTIC_SERVICE_URL: http://agentic:8000
     command: celery -A worker worker --loglevel=info
 
   notifications:
