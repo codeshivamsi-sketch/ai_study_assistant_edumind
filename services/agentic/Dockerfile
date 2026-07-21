@@ -12,12 +12,16 @@ RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTr
 COPY . .
 
 # agents/agents.py does sqlite3.connect("checkpoints.db", ...) - a relative
-# path resolving to /app/checkpoints.db (a FILE). Docker's named-volume
-# mount only preserves a mount target as a file if a regular file already
-# exists there in the image when the container is first created -
-# otherwise it silently creates a directory instead, which would break
-# sqlite3.connect() outright. This line exists so the docker-compose
-# volume mount in Task 3 works correctly.
-RUN touch checkpoints.db
+# path resolving to /app/checkpoints.db (a FILE). Named-volume mounts onto
+# a single file are unreliable across Docker Engine versions/snapshotter
+# backends (some silently turn the mount target into a directory even
+# when a real file exists there at image-build time; on containerd-
+# snapshotter backends it can fail container creation outright with
+# "is not directory"). Mounting onto a plain directory is the universally
+# supported case, so /data is a real directory the volume mounts onto,
+# and checkpoints.db becomes a symlink into it - sqlite3.connect()
+# follows the symlink transparently and creates the real file inside the
+# mounted, persisted directory. No application code changes needed.
+RUN mkdir -p /data && rm -f checkpoints.db && ln -s /data/checkpoints.db checkpoints.db
 
 CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
