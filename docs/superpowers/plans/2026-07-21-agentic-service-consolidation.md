@@ -175,18 +175,22 @@ RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTr
 COPY . .
 
 # agents/agents.py does sqlite3.connect("checkpoints.db", ...) - a relative
-# path resolving to /app/checkpoints.db (a FILE). Docker's named-volume
-# mount only preserves a mount target as a file if a regular file already
-# exists there in the image when the container is first created -
-# otherwise it silently creates a directory instead, which would break
-# sqlite3.connect() outright. This line exists so the docker-compose
-# volume mount in Task 3 works correctly.
-RUN touch checkpoints.db
+# path resolving to /app/checkpoints.db (a FILE). Named-volume mounts onto
+# a single file are unreliable across Docker Engine versions/snapshotter
+# backends (some silently turn the mount target into a directory even
+# when a real file exists there at image-build time; on containerd-
+# snapshotter backends it can fail container creation outright with
+# "is not directory"). Mounting onto a plain directory is the universally
+# supported case, so /data is a real directory the volume mounts onto,
+# and checkpoints.db becomes a symlink into it - sqlite3.connect()
+# follows the symlink transparently and creates the real file inside the
+# mounted, persisted directory. No application code changes needed.
+RUN mkdir -p /data && rm -f checkpoints.db && ln -s /data/checkpoints.db checkpoints.db
 
 CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
 ```
 
-Two deltas from upstream: the `eval/requirements-eval.txt` copy+install (bundling eval deps into the runtime image, per project decision), and `RUN touch checkpoints.db` (the volume-mount fix). Everything else — `WORKDIR`, the model pre-download step, `CMD` — is unchanged from upstream.
+Two deltas from upstream: the `eval/requirements-eval.txt` copy+install (bundling eval deps into the runtime image, per project decision), and the `/data` symlink (the volume-mount fix — revised from an earlier `RUN touch checkpoints.db` approach after Task 4's verification hit a real container-creation failure on this machine's Docker Engine; see the ledger for the full incident). Everything else — `WORKDIR`, the model pre-download step, `CMD` — is unchanged from upstream.
 
 - [ ] **Step 3: Verify it builds standalone**
 
@@ -197,24 +201,27 @@ docker build -f services/agentic/Dockerfile -t agentic-test ./services/agentic
 
 Expected: build succeeds through all layers, including the `pip install` (both requirements files) and the model pre-download step (will take a minute or two — it downloads a real model from HuggingFace during this step).
 
-- [ ] **Step 4: Verify the checkpoint file exists in the built image**
+- [ ] **Step 4: Verify the checkpoint path is a symlink into a real directory**
 
 ```bash
-docker run --rm agentic-test ls -la /app/checkpoints.db
+docker run --rm agentic-test ls -la /app/checkpoints.db /data
 ```
 
-Expected: shows a regular file (not a directory), e.g. `-rw-r--r-- 1 root root 0 ... /app/checkpoints.db`.
+Expected: `/app/checkpoints.db` shows as a symlink (`lrwxr-xr-x ... checkpoints.db -> /data/checkpoints.db`), and `/data` exists as an empty directory.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add services/agentic/Dockerfile
-git commit -m "fix(agentic): bundle eval deps, fix checkpoints.db volume-mount gotcha
+git commit -m "fix(agentic): bundle eval deps, mount checkpoints via a symlinked directory
 
-RUN touch checkpoints.db ensures the sqlite checkpoint file exists as
-a regular file in the image before docker-compose (Task 3) mounts a
-named volume there - otherwise Docker would silently create a
-directory instead, breaking agents.py's sqlite3.connect() call."
+Named-volume mounts onto a single file are unreliable across Docker
+Engine versions - some silently turn the target into a directory,
+others (containerd-snapshotter backends) fail container creation
+outright with 'is not directory'. /data is a real directory (the
+universally-supported mount case); checkpoints.db is a symlink into
+it, so sqlite3.connect() in agents.py needs no code changes and still
+transparently persists through the mounted volume."
 ```
 
 ---
@@ -329,7 +336,7 @@ services:
       - neo4j
     volumes:
       - agentic_chroma:/app/chroma_db
-      - agentic_checkpoints:/app/checkpoints.db
+      - agentic_checkpoints:/data
       - agentic_uploads:/app/uploads
 
   prometheus:
@@ -440,19 +447,16 @@ would only appear after a real `/upload` request triggers a download.
 - [ ] **Step 6: Confirm the checkpoints.db volume-mount fix actually worked**
 
 ```bash
-docker exec python_backend_refresher-agentic-1 stat /app/checkpoints.db
+docker exec python_backend_refresher-agentic-1 stat /app/checkpoints.db /data
 ```
 
-Expected: `File: /app/checkpoints.db` with type `regular file` — NOT
-`directory`. If this shows a directory, the `RUN touch checkpoints.db`
-fix from Task 2 didn't take effect (e.g. volumes were created before the
-image was rebuilt with that fix) — find the actual volume name first
-(don't guess the project-name prefix), then remove it and redo Step 2:
-
-```bash
-docker volume ls | grep agentic_checkpoints
-docker volume rm <name from the line above>
-```
+Expected: `/app/checkpoints.db` shows type `symbolic link` (pointing at
+`/data/checkpoints.db`), and `/data` shows type `directory` — the mounted
+volume. If `/app/checkpoints.db` reports `regular file` or the container
+failed to start at all with an `is not directory` error, the symlink fix
+from Task 2 either wasn't applied or this Docker Engine has a different
+variant of the same limitation — stop and report the exact error rather
+than guessing further.
 
 - [ ] **Step 7: Confirm Neo4j itself is reachable**
 
