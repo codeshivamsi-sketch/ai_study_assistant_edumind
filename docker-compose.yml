@@ -79,6 +79,12 @@ services:
       NEO4J_AUTH: neo4j/password
     volumes:
       - neo4j_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p password 'RETURN 1' || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
 
   agentic:
     build: ./services/agentic
@@ -91,7 +97,8 @@ services:
       NEO4J_USER: neo4j
       NEO4J_PASSWORD: password
     depends_on:
-      - neo4j
+      neo4j:
+        condition: service_healthy
     volumes:
       - agentic_chroma:/app/chroma_db
       - agentic_checkpoints:/data
