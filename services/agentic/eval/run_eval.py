@@ -11,7 +11,11 @@ from ragas.embeddings import LangchainEmbeddingsWrapper
 from dotenv import load_dotenv
 
 load_dotenv("../.env")
-print("KEY: ", os.getenv("ANTHROPIC_API_KEY"))
+
+# Runs on the host against the live Docker API, not inside docker-compose —
+# must hit the host-mapped port (8002, per this monorepo's docker-compose.yml
+# "8002:8000"), not the container's internal 8000.
+EDUMIND_BASE_URL = os.getenv("EDUMIND_BASE_URL", "http://localhost:8002")
 
 # Judge LLM → Claude
 llm = LangchainLLMWrapper(ChatAnthropic(
@@ -33,7 +37,7 @@ questions, answers, contexts, ground_truths = [], [], [], []
 for item in golden:
     question = item["question"]
     try:
-        response = requests.post("http://localhost:8000/query", json={"question": question}, timeout=30)
+        response = requests.post(f"{EDUMIND_BASE_URL}/query", json={"question": question}, timeout=30)
         if response.status_code != 200 or not response.text:
             print(f"SKIP (status {response.status_code}): {question[:50]}")
             continue

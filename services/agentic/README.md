@@ -79,34 +79,38 @@ flowchart TD
 
 ## Project Structure
 
+This service lives inside the `python_backend_refresher` monorepo as
+`services/agentic/`, alongside `services/core-api` and
+`services/notifications` — it shares the root `docker-compose.yml`, not
+its own:
+
 ```
-edu_mind_ai/
-├── backend/
-│   ├── api/
-│   │   └── main.py              # FastAPI app + all endpoints
-│   ├── core/
-│   │   ├── config.py            # Shared clients (Chroma, Neo4j, Anthropic, embedder)
-│   │   ├── model.py             # Pydantic models + EduMindState TypedDict
-│   │   ├── ingest.py            # PDF parsing, chunking, embedding, Chroma storage
-│   │   ├── query.py             # Vector search + graph traversal + Claude answer
-│   │   └── graph.py             # Entity extraction + Neo4j operations
-│   ├── agents/
-│   │   └── agents.py            # LangGraph nodes + graph definition
-│   ├── mcp/
-│   │   └── server.py            # MCP server exposing 3 tools to Claude Desktop
-│   ├── eval/
-│   │   ├── run_eval.py          # RAGAs evaluation script
-│   │   ├── golden_dataset.json  # 30 Q&A pairs for evaluation
-│   │   └── requirements-eval.txt
-│   ├── requirements.txt
-│   └── Dockerfile
+services/agentic/
+├── api/
+│   └── main.py              # FastAPI app + all endpoints
+├── core/
+│   ├── config.py            # Shared clients (Chroma, Neo4j, Anthropic, embedder)
+│   ├── model.py             # Pydantic models + EduMindState TypedDict
+│   ├── ingest.py            # PDF parsing, chunking, embedding, Chroma storage
+│   ├── query.py             # Vector search + graph traversal + Claude answer
+│   └── graph.py             # Entity extraction + Neo4j operations
+├── agents/
+│   └── agents.py            # LangGraph nodes + graph definition
+├── mcp/
+│   └── server.py            # MCP server exposing 3 tools to Claude Desktop
+├── eval/
+│   ├── run_eval.py          # RAGAs evaluation script
+│   ├── golden_dataset.json  # 30 Q&A pairs for evaluation
+│   └── requirements-eval.txt
 ├── docs/
 │   ├── neo4j.png                # Knowledge graph screenshot
 │   ├── langsmith.png            # LangSmith tracing screenshot
 │   ├── ragas.png                # RAGAs eval scores screenshot
 │   └── mcp.png                  # Claude Desktop MCP tool call screenshot
-├── docker-compose.yml
-└── README.md
+├── requirements.txt
+├── Dockerfile
+├── .dockerignore
+└── .env.example
 ```
 
 ---
@@ -119,30 +123,34 @@ edu_mind_ai/
 
 ### Run
 
+From the monorepo root:
+
 ```bash
-# Clone the repo
-git clone https://github.com/codeshivamsi-sketch/edu_mind_ai_study_assistance.git
-cd edu_mind_ai_study_assistance
-
 # Add environment variables
-cp backend/.env.example backend/.env
-# Fill in your API keys in backend/.env
+cp services/agentic/.env.example services/agentic/.env
+# Fill in your API keys in services/agentic/.env — docker-compose.yml's
+# agentic service reads this file directly via env_file
 
-# Start all services
+# Start all services (or just neo4j + agentic)
 docker-compose up --build
+# docker-compose up --build neo4j agentic
 ```
 
-### Environment Variables
+The service listens on host port **8002** (container port 8000 — 8000 is
+already owned by `core-api` in this monorepo).
+
+### Environment Variables (`services/agentic/.env`)
 
 ```env
 ANTHROPIC_API_KEY=your-key
-NEO4J_URI=bolt://neo4j:7687
-NEO4J_USER=neo4j
-NEO4J_PASSWORD=password
 LANGCHAIN_API_KEY=your-key
 LANGCHAIN_TRACING_V2=true
 LANGCHAIN_PROJECT=edumind
 ```
+
+`NEO4J_URI`/`NEO4J_USER`/`NEO4J_PASSWORD` don't go in this file — they're
+set directly in the root `docker-compose.yml`'s `agentic` service to point
+at the in-compose `neo4j` service (`bolt://neo4j:7687`).
 
 ---
 
@@ -150,15 +158,16 @@ LANGCHAIN_PROJECT=edumind
 
 ```bash
 # Create eval environment (Python 3.11 required)
-cd backend/eval
+cd services/agentic/eval
 python3.11 -m venv eval_venv
 source eval_venv/bin/activate
 pip install -r requirements-eval.txt
 
-# Make sure Docker is running first
-docker-compose up -d
+# Make sure the agentic + neo4j containers are running first (from repo root)
+docker-compose up -d neo4j agentic
 
-# Run RAGAs evaluation
+# Run RAGAs evaluation (hits http://localhost:8002 by default;
+# override with EDUMIND_BASE_URL)
 python run_eval.py
 ```
 
@@ -171,7 +180,7 @@ python run_eval.py
 POST /upload
 Content-Type: multipart/form-data
 
-curl -X POST http://localhost:8000/upload \
+curl -X POST http://localhost:8002/upload \
   -F "file=@curriculum.pdf"
 
 # Response
@@ -283,19 +292,24 @@ GET /health
 
 #### Connect to Claude Desktop
 
-Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
+Add to `~/Library/Application Support/Claude/claude_desktop_config.json`
+(paths below are inside your local clone of the monorepo):
 
 ```json
 {
   "mcpServers": {
     "edumind": {
-      "command": "/path/to/edu_mind_ai/backend/venv/bin/python",
-      "args": ["/path/to/edu_mind_ai/backend/mcp/server.py"]
+      "command": "/path/to/python_backend_refresher/services/agentic/venv/bin/python",
+      "args": ["/path/to/python_backend_refresher/services/agentic/mcp/server.py"]
     }
   }
 }
 ```
 
-Restart Claude Desktop. Make sure Docker is running first.
+The MCP server runs as a local stdio subprocess (not inside Docker) and
+talks to the API at `http://localhost:8002` by default — override with the
+`EDUMIND_BASE_URL` env var if you've remapped the host port. Restart Claude
+Desktop after editing the config. Make sure `docker-compose up neo4j
+agentic` is running first.
 
 ![MCP](docs/mcp.png)

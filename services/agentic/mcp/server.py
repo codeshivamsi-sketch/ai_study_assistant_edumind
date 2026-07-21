@@ -1,10 +1,14 @@
 import asyncio
+import os
 import requests
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp import types
 
-BASE_URL = "http://localhost:8000"
+# Runs as a local stdio subprocess launched by Claude Desktop (not inside
+# docker-compose), so it must hit the host-mapped port — 8002, per this
+# monorepo's docker-compose.yml ("8002:8000"), not the container's internal 8000.
+BASE_URL = os.getenv("EDUMIND_BASE_URL", "http://localhost:8002")
 
 app = Server("edumind")
 
