@@ -105,24 +105,32 @@ COPY eval eval
 RUN pip install -r requirements.txt -r eval/requirements-eval.txt
 RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
 COPY . .
-RUN touch checkpoints.db
+RUN mkdir -p /data && rm -f checkpoints.db && ln -s /data/checkpoints.db checkpoints.db
 CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
 ```
 
 Container keeps listening on 8000 internally (unchanged from upstream —
 minimal diff, easier to compare against upstream later);
-`docker-compose.yml` maps host **8001** → container 8000.
+`docker-compose.yml` maps host **8002** → container 8000 (revised from an
+initial 8001 during implementation — a stale leftover
+`python_backend_refresher-ledger-1` container from this repo's own deleted
+`ledger` service held that port).
 
-**The `RUN touch checkpoints.db` line matters and isn't cosmetic.**
-`agents/agents.py` does `sqlite3.connect("checkpoints.db", ...)` — a
-relative path resolving to `/app/checkpoints.db` (CWD = `WORKDIR /app`), a
-single *file*, not a directory. Docker's named-volume mount only preserves
-a mount target as a file if a regular file already exists there in the
-image when the container is first created — otherwise it silently creates
-a *directory* at that path instead, which would break `sqlite3.connect()`
-outright. `touch`ing an empty file at build time is the minimal, code-free
-fix (matches the "no app-logic changes" constraint below — this is a
-Dockerfile/infra concern, not application code).
+**The `/data` symlink line matters and isn't cosmetic.** `agents/agents.py`
+does `sqlite3.connect("checkpoints.db", ...)` — a relative path resolving
+to `/app/checkpoints.db` (CWD = `WORKDIR /app`), a single *file*, not a
+directory. Named-volume mounts onto a single file are unreliable across
+Docker Engine versions and storage/snapshotter backends — some silently
+turn the mount target into a directory even when a real file exists there
+at image-build time (the original plan's `RUN touch checkpoints.db`
+approach assumed this case); others (confirmed during implementation, on a
+containerd-snapshotter backend) refuse container creation outright with
+`is not directory`. Mounting onto a plain directory is the universally
+supported case, so `/data` is a real directory the volume mounts onto, and
+`checkpoints.db` becomes a symlink into it — `sqlite3.connect()` follows
+the symlink transparently, still with no application code changes (matches
+the "no app-logic changes" constraint below — this is a Dockerfile/infra
+concern, not application code).
 
 ## `docker-compose.yml`
 
@@ -131,20 +139,24 @@ New `neo4j` service:
 neo4j:
   image: neo4j:latest
   ports:
-    - "7474:7474"
-    - "7687:7687"
+    - "7475:7474"
+    - "7688:7687"
   environment:
     NEO4J_AUTH: neo4j/password
   volumes:
     - neo4j_data:/data
 ```
 
+(Host ports 7475/7688, not the standard 7474/7687 — an unrelated
+already-running `edu_mind_ai-neo4j-1` container held those on the
+implementation machine.)
+
 New `agentic` service:
 ```yaml
 agentic:
   build: ./services/agentic
   ports:
-    - "8001:8000"
+    - "8002:8000"
   environment:
     ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
     NEO4J_URI: bolt://neo4j:7687
@@ -157,7 +169,7 @@ agentic:
     - neo4j
   volumes:
     - agentic_chroma:/app/chroma_db
-    - agentic_checkpoints:/app/checkpoints.db
+    - agentic_checkpoints:/data
     - agentic_uploads:/app/uploads
 ```
 
@@ -167,8 +179,10 @@ All three paths are confirmed against the actual source, not guessed:
 `core/ingest.py`'s `os.makedirs("uploads", ...)`) both resolve relative to
 `/app` and are directories Docker auto-creates correctly on mount.
 `checkpoints.db` (`agents/agents.py`'s `sqlite3.connect("checkpoints.db",
-...)`) is the single-file case handled by the Dockerfile's
-`RUN touch checkpoints.db` above.
+...)`) is the single-file case — mounted via the Dockerfile's `/data`
+symlink above rather than at its own path directly, since a container
+that mounted a volume straight onto `/app/checkpoints.db` failed to even
+start on the implementation machine's Docker Engine.
 
 `core-api` gets one line added to its existing environment block:
 `AGENTIC_SERVICE_URL: http://agentic:8000`.
