@@ -17,8 +17,8 @@ def health():
 
 @app.post("/upload")
 async def upload_pdf(file: UploadFile = File(...), document_id: Optional[str] = Form(None)):
-    await save_pdf_on_disk(file)
-    pdf_content = get_pdf_content(f"uploads/{file.filename}")
+    safe_filename = await save_pdf_on_disk(file)
+    pdf_content = get_pdf_content(f"uploads/{safe_filename}")
     chunks = split_content_into_chunks(pdf_content)
     embeddings = embed_chunks(chunks)
     store_in_chroma(chunks, embeddings, document_id)

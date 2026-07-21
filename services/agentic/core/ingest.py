@@ -7,9 +7,10 @@ from core.graph import extract_entities, store_entities
 async def save_pdf_on_disk(file):
     contents = await file.read()
     os.makedirs("uploads", exist_ok=True)
-    with open(f"uploads/{file.filename}", "wb") as f:
+    safe_filename = os.path.basename(file.filename)
+    with open(f"uploads/{safe_filename}", "wb") as f:
         f.write(contents)
-    return
+    return safe_filename
 
 
 def get_pdf_content(filename: str):
