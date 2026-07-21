@@ -9,7 +9,7 @@ from agentic_client import request_quiz
 from database import DATABASE_URL
 from grpc_client import notify_quiz_ready as send_grpc_notification
 from logger import log
-from models import Quiz
+from models import Document, Quiz
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 RETRY_COUNTDOWN = int(os.getenv("NOTIFY_QUIZ_READY_RETRY_COUNTDOWN", "60"))
@@ -52,17 +52,33 @@ async def _insert_quiz(document_id: str, topic: str, questions: list) -> str:
         await engine.dispose()
 
 
+async def _mark_document_failed(document_id: str) -> None:
+    engine = create_async_engine(DATABASE_URL, echo=False)
+    SessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    try:
+        async with SessionLocal() as session:
+            document = await session.get(Document, document_id)
+            if document:
+                document.status = "failed"
+                await session.commit()
+    finally:
+        await engine.dispose()
+
+
 @celery_app.task(bind=True, max_retries=2, name="generate_quiz")
 def generate_quiz(self, user_id, document_id, topic):
     try:
         questions = request_quiz(document_id, topic)
     except Exception as exc:
+        if self.request.retries >= self.max_retries:
+            asyncio.run(_mark_document_failed(document_id))
         raise self.retry(exc=exc, countdown=GENERATE_QUIZ_RETRY_COUNTDOWN)
 
     try:
         quiz_id = asyncio.run(_insert_quiz(document_id, topic, questions))
     except Exception as exc:
         log.error("generate_quiz_insert_failed", document_id=document_id, error=str(exc))
+        asyncio.run(_mark_document_failed(document_id))
         return
 
     try:

@@ -27,6 +27,20 @@ async def _create_ready_document() -> str:
         return document["id"]
 
 
+async def _fetch_document_status(document_id: str):
+    # Fresh engine per call, same reason as _fetch_quiz above.
+    from models import Document
+
+    engine = create_async_engine(DATABASE_URL)
+    SessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    try:
+        async with SessionLocal() as session:
+            document = await session.get(Document, document_id)
+            return document.status if document else None
+    finally:
+        await engine.dispose()
+
+
 async def _fetch_quiz(document_id: str):
     # Fresh engine per call, same reason as worker.py's _insert_quiz and
     # test_routes.py's own override_get_db: asyncio.run() gives this a new
@@ -70,3 +84,41 @@ def test_generate_quiz_inserts_quiz_and_dispatches_notify(monkeypatch):
     assert quiz is not None
     assert quiz.topic == "Chapter 2"
     assert quiz.questions == ["Q1: What is machine learning?"]
+
+
+def test_generate_quiz_marks_document_failed_after_exhausting_retries(monkeypatch):
+    document_id = asyncio.run(_create_ready_document())
+
+    def fake_request_quiz(doc_id, topic):
+        raise RuntimeError("agentic unreachable")
+
+    monkeypatch.setattr("worker.request_quiz", fake_request_quiz)
+    monkeypatch.setattr("worker.GENERATE_QUIZ_RETRY_COUNTDOWN", 0)
+
+    result = generate_quiz.apply(args=[ALICE_ID, document_id, "Some Topic"])
+
+    assert result.failed()
+
+    status = asyncio.run(_fetch_document_status(document_id))
+    assert status == "failed"
+
+
+def test_generate_quiz_marks_document_failed_on_insert_error(monkeypatch):
+    document_id = asyncio.run(_create_ready_document())
+
+    def fake_request_quiz(doc_id, topic):
+        return ["Q1: What is machine learning?"]
+
+    monkeypatch.setattr("worker.request_quiz", fake_request_quiz)
+
+    async def fake_insert_quiz(doc_id, topic, questions):
+        raise RuntimeError("db insert failed")
+
+    monkeypatch.setattr("worker._insert_quiz", fake_insert_quiz)
+
+    result = generate_quiz.apply(args=[ALICE_ID, document_id, "Some Topic"])
+
+    assert result.successful()  # generate_quiz swallows the insert error, returns None
+
+    status = asyncio.run(_fetch_document_status(document_id))
+    assert status == "failed"
