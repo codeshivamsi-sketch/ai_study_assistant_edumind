@@ -1,5 +1,6 @@
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI, UploadFile, File, Form
 import os
+from typing import Optional
 from core.ingest import save_pdf_on_disk, get_pdf_content, split_content_into_chunks, embed_chunks, store_in_chroma, ingest_graph
 from core.query import embed_ques, get_searched_chunks_from_chroma, get_ans_from_claud, get_related_from_graph
 import chromadb
@@ -15,21 +16,21 @@ def health():
 
 
 @app.post("/upload")
-async def upload_pdf(file: UploadFile = File(...)):
+async def upload_pdf(file: UploadFile = File(...), document_id: Optional[str] = Form(None)):
     await save_pdf_on_disk(file)
     pdf_content = get_pdf_content(f"uploads/{file.filename}")
     chunks = split_content_into_chunks(pdf_content)
     embeddings = embed_chunks(chunks)
-    store_in_chroma(chunks, embeddings)
+    store_in_chroma(chunks, embeddings, document_id)
     ingest_graph(chunks)
-    return {"filename": file.filename, "chunks": len(chunks)}
+    return {"filename": file.filename, "chunks": len(chunks), "document_id": document_id}
 
 
 @app.post("/query")
 def query_endpoint(request: QueryRequest):
     question = request.question
     question_embedding = embed_ques(question)
-    chunks = get_searched_chunks_from_chroma(question_embedding)
+    chunks = get_searched_chunks_from_chroma(question_embedding, request.document_id)
     graph_concepts = get_related_from_graph(question)
     response = get_ans_from_claud(question, chunks, graph_concepts)
     return {
@@ -43,7 +44,7 @@ def query_endpoint(request: QueryRequest):
 def agent_endpoint(request: AgentRequest):
     thread_id = str(uuid.uuid4())
     config = {"configurable": {"thread_id": thread_id}}
-    result = agent.invoke({"question": request.question}, config=config)
+    result = agent.invoke({"question": request.question, "document_id": request.document_id}, config=config)
     return {**result, "thread_id": thread_id}
 
 

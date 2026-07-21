@@ -7,11 +7,11 @@ def embed_ques(question: str):
     question_embedding = model.encode(question).tolist()
     return question_embedding
 
-def get_searched_chunks_from_chroma(question_embedding):
-    results = collection.query(
-        query_embeddings=[question_embedding],
-        n_results=3
-    )
+def get_searched_chunks_from_chroma(question_embedding, document_id: str | None = None):
+    query_kwargs = {"query_embeddings": [question_embedding], "n_results": 3}
+    if document_id:
+        query_kwargs["where"] = {"document_id": document_id}
+    results = collection.query(**query_kwargs)
     chunks = results["documents"][0]
     print("Chunks from chroma: ", chunks)
     return chunks

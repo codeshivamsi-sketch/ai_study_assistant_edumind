@@ -31,12 +31,17 @@ def embed_chunks(chunks: list[str]):
     return embeddings.tolist()
 
 
-def store_in_chroma(chunks: list[str], embeddings: list):
-    collection.add(
-        documents=chunks,
-        embeddings=embeddings,
-        ids=[str(i) for i in range(len(chunks))]
-    )
+def store_in_chroma(chunks: list[str], embeddings: list, document_id: str | None = None):
+    if document_id:
+        ids = [f"{document_id}-{i}" for i in range(len(chunks))]
+        metadatas = [{"document_id": document_id} for _ in chunks]
+        collection.add(documents=chunks, embeddings=embeddings, ids=ids, metadatas=metadatas)
+    else:
+        collection.add(
+            documents=chunks,
+            embeddings=embeddings,
+            ids=[str(i) for i in range(len(chunks))]
+        )
 
 
 def ingest_graph(chunks: list[str]):

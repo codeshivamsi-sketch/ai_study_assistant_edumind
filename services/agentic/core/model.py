@@ -1,12 +1,14 @@
 from pydantic import BaseModel
-from typing import List, TypedDict
+from typing import List, Optional, TypedDict
 
 class QueryRequest(BaseModel):
     question: str
+    document_id: Optional[str] = None
 
 
 class EduMindState(TypedDict):
     question: str
+    document_id: str
     intent: str     # "answer", "quiz", "summarize", "evaluate"
     chunks: List[str]
     related_concepts: List[str]
@@ -19,6 +21,7 @@ class EduMindState(TypedDict):
 
 class AgentRequest(BaseModel):
     question: str
+    document_id: Optional[str] = None
 
 
 class EvaluateRequest(BaseModel):

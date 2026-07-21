@@ -21,8 +21,9 @@ def orchestrator_node(state: EduMindState):
 
 def retrieval_node(state: EduMindState):
     question = state["question"]
+    document_id = state.get("document_id")
     embedding = embed_ques(question)
-    chunks = get_searched_chunks_from_chroma(embedding)
+    chunks = get_searched_chunks_from_chroma(embedding, document_id)
     related_concepts = get_related_from_graph(question)
     return {"chunks": chunks, "related_concepts": related_concepts}
 
