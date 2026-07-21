@@ -96,7 +96,7 @@ services:
       - neo4j
     volumes:
       - agentic_chroma:/app/chroma_db
-      - agentic_checkpoints:/app/checkpoints.db
+      - agentic_checkpoints:/data
       - agentic_uploads:/app/uploads
 
   prometheus:
