@@ -12,3 +12,13 @@ async def upload_document(document_id: str, filename: str, content: bytes) -> No
             data={"document_id": document_id},
         )
         response.raise_for_status()
+
+
+def request_quiz(document_id: str, topic: str) -> list:
+    response = httpx.post(
+        f"{AGENTIC_SERVICE_URL}/agent",
+        json={"question": f"Quiz me on {topic}", "document_id": document_id},
+        timeout=60,
+    )
+    response.raise_for_status()
+    return response.json()["quiz_questions"]

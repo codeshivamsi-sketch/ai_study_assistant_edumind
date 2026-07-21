@@ -83,3 +83,37 @@ async def test_upload_404s_on_other_users_document(monkeypatch):
         )
 
         assert upload_response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_generate_quiz_409s_when_document_not_ready():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        create_response = await client.post(
+            "/documents", json={"title": "Not Ready Doc", "status": "uploaded"}, headers=auth(ALICE_ID)
+        )
+        document = create_response.json()
+
+        generate_response = await client.post(
+            "/quizzes/generate",
+            json={"document_id": document["id"], "topic": "Chapter 1"},
+            headers=auth(ALICE_ID),
+        )
+
+        assert generate_response.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_generate_quiz_404s_on_other_users_document():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        create_response = await client.post(
+            "/documents", json={"title": "Alice's Ready Doc", "status": "ready"}, headers=auth(ALICE_ID)
+        )
+        document = create_response.json()
+
+        generate_response = await client.post(
+            "/quizzes/generate",
+            json={"document_id": document["id"], "topic": "Chapter 1"},
+            headers=auth(BOB_ID),
+        )
+
+        assert generate_response.status_code == 404

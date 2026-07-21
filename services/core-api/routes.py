@@ -117,6 +117,10 @@ class QuizUpdateRequest(BaseModel):
     topic: Optional[str] = None
     questions: Optional[Any] = None
 
+class GenerateQuizRequest(BaseModel):
+    document_id: uuid.UUID
+    topic: str
+
 async def _get_owned_quiz(quiz_id: uuid.UUID, user: User, db: AsyncSession) -> Quiz:
     result = await db.execute(
         select(Quiz)
@@ -144,6 +148,21 @@ async def create_quiz(
     except Exception as e:
         log.warning("notify_quiz_ready_dispatch_failed", quiz_id=str(quiz.id), error=str(e))
     return quiz
+
+@router.post("/quizzes/generate", status_code=202)
+async def generate_quiz_request(
+    request: GenerateQuizRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    document = await _get_owned_document(request.document_id, user, db)
+    if document.status != "ready":
+        raise HTTPException(status_code=409, detail="Document not ready for quiz generation")
+    task = celery_app.send_task(
+        "generate_quiz",
+        args=[str(user.id), str(request.document_id), request.topic],
+    )
+    return {"job_id": task.id}
 
 @router.get("/quizzes")
 async def list_quizzes(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
