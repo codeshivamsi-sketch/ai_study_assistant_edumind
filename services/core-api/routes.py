@@ -7,7 +7,7 @@ import uuid
 
 from database import get_db
 from identity import get_current_user
-from models import User, Document, Quiz, QuizAttempt
+from models import User, Document, Quiz, QuizAttempt, Chat
 from logger import log
 from worker import celery_app
 from agentic_client import upload_document
@@ -235,3 +235,50 @@ async def get_quiz_stats(
         "avg_score": float(avg_score) if avg_score is not None else None,
         "attempt_count": attempt_count,
     }
+
+# ---- Chats ----
+
+class ChatCreateRequest(BaseModel):
+    document_id: uuid.UUID
+    title: Optional[str] = None
+
+class MessageCreateRequest(BaseModel):
+    content: str
+
+async def _get_owned_chat(chat_id: uuid.UUID, user: User, db: AsyncSession) -> Chat:
+    result = await db.execute(
+        select(Chat).where(Chat.id == chat_id, Chat.user_id == user.id)
+    )
+    chat = result.scalar_one_or_none()
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat not found")
+    return chat
+
+@router.post("/chats")
+async def create_chat(
+    request: ChatCreateRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    document = await _get_owned_document(request.document_id, user, db)
+    if document.status != "ready":
+        raise HTTPException(status_code=409, detail="Document not ready for chat")
+    chat = Chat(user_id=user.id, document_id=request.document_id, title=request.title)
+    db.add(chat)
+    await db.commit()
+    await db.refresh(chat)
+    log.info("chat_created", chat_id=str(chat.id), document_id=str(document.id), user_id=str(user.id))
+    return chat
+
+@router.get("/chats")
+async def list_chats(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    result = await db.execute(
+        select(Chat).where(Chat.user_id == user.id).order_by(Chat.created_at.desc())
+    )
+    return result.scalars().all()
+
+@router.get("/chats/{chat_id}")
+async def get_chat(
+    chat_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)
+):
+    return await _get_owned_chat(chat_id, user, db)
