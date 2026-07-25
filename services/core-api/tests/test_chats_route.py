@@ -74,3 +74,96 @@ async def test_list_chats_newest_first():
         assert response.status_code == 200
         ids = [c["id"] for c in response.json()]
         assert ids.index(second["id"]) < ids.index(first["id"])
+
+
+@pytest.mark.asyncio
+async def test_create_message_happy_path(monkeypatch):
+    async def fake_ask_question(document_id, question):
+        assert question == "What is chapter 1 about?"
+        return "Chapter 1 covers photosynthesis."
+
+    monkeypatch.setattr("routes.ask_question", fake_ask_question)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        document = await create_document(client, ALICE_ID, "Messages doc")
+        chat = await create_chat(client, ALICE_ID, document["id"])
+
+        response = await client.post(
+            f"/chats/{chat['id']}/messages",
+            json={"content": "What is chapter 1 about?"},
+            headers=auth(ALICE_ID),
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["user_message"]["role"] == "user"
+        assert body["user_message"]["content"] == "What is chapter 1 about?"
+        assert body["assistant_message"]["role"] == "assistant"
+        assert body["assistant_message"]["content"] == "Chapter 1 covers photosynthesis."
+
+        messages = await client.get(f"/chats/{chat['id']}/messages", headers=auth(ALICE_ID))
+        assert messages.status_code == 200
+        roles = [m["role"] for m in messages.json()]
+        assert roles == ["user", "assistant"]
+
+
+@pytest.mark.asyncio
+async def test_create_message_502s_on_agentic_failure_keeps_user_row(monkeypatch):
+    async def failing_ask_question(document_id, question):
+        raise RuntimeError("agentic unreachable")
+
+    monkeypatch.setattr("routes.ask_question", failing_ask_question)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        document = await create_document(client, ALICE_ID, "Failure doc")
+        chat = await create_chat(client, ALICE_ID, document["id"])
+
+        response = await client.post(
+            f"/chats/{chat['id']}/messages",
+            json={"content": "Will this fail?"},
+            headers=auth(ALICE_ID),
+        )
+        assert response.status_code == 502
+
+        messages = await client.get(f"/chats/{chat['id']}/messages", headers=auth(ALICE_ID))
+        roles = [m["role"] for m in messages.json()]
+        assert roles == ["user"]
+
+
+@pytest.mark.asyncio
+async def test_messages_ordered_by_created_at_asc(monkeypatch):
+    answers = iter(["First answer.", "Second answer."])
+
+    async def fake_ask_question(document_id, question):
+        return next(answers)
+
+    monkeypatch.setattr("routes.ask_question", fake_ask_question)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        document = await create_document(client, ALICE_ID, "Ordering doc")
+        chat = await create_chat(client, ALICE_ID, document["id"])
+
+        await client.post(f"/chats/{chat['id']}/messages", json={"content": "First question"}, headers=auth(ALICE_ID))
+        await client.post(f"/chats/{chat['id']}/messages", json={"content": "Second question"}, headers=auth(ALICE_ID))
+
+        messages = await client.get(f"/chats/{chat['id']}/messages", headers=auth(ALICE_ID))
+        contents = [m["content"] for m in messages.json()]
+        assert contents == ["First question", "First answer.", "Second question", "Second answer."]
+
+
+@pytest.mark.asyncio
+async def test_cross_user_chat_access_denied_matrix(monkeypatch):
+    async def fake_ask_question(document_id, question):
+        return "answer"
+
+    monkeypatch.setattr("routes.ask_question", fake_ask_question)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        document = await create_document(client, ALICE_ID, "Private chat doc")
+        chat = await create_chat(client, ALICE_ID, document["id"])
+
+        assert (await client.get(f"/chats/{chat['id']}/messages", headers=auth(BOB_ID))).status_code == 404
+        assert (
+            await client.post(
+                f"/chats/{chat['id']}/messages", json={"content": "hijack"}, headers=auth(BOB_ID)
+            )
+        ).status_code == 404

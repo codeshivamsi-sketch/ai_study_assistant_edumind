@@ -7,10 +7,10 @@ import uuid
 
 from database import get_db
 from identity import get_current_user
-from models import User, Document, Quiz, QuizAttempt, Chat
+from models import User, Document, Quiz, QuizAttempt, Chat, Message
 from logger import log
 from worker import celery_app
-from agentic_client import upload_document
+from agentic_client import upload_document, ask_question
 
 router = APIRouter()
 
@@ -282,3 +282,39 @@ async def get_chat(
     chat_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)
 ):
     return await _get_owned_chat(chat_id, user, db)
+
+@router.get("/chats/{chat_id}/messages")
+async def list_messages(
+    chat_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)
+):
+    await _get_owned_chat(chat_id, user, db)
+    result = await db.execute(
+        select(Message).where(Message.chat_id == chat_id).order_by(Message.created_at.asc())
+    )
+    return result.scalars().all()
+
+@router.post("/chats/{chat_id}/messages")
+async def create_message(
+    chat_id: uuid.UUID,
+    request: MessageCreateRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    chat = await _get_owned_chat(chat_id, user, db)
+    user_message = Message(chat_id=chat_id, role="user", content=request.content)
+    db.add(user_message)
+    await db.commit()
+    await db.refresh(user_message)
+
+    try:
+        answer = await ask_question(str(chat.document_id), request.content)
+    except Exception as e:
+        log.warning("chat_message_agentic_failed", chat_id=str(chat_id), error=str(e))
+        raise HTTPException(status_code=502, detail="Failed to get an answer")
+
+    assistant_message = Message(chat_id=chat_id, role="assistant", content=answer)
+    db.add(assistant_message)
+    await db.commit()
+    await db.refresh(assistant_message)
+    log.info("chat_message_created", chat_id=str(chat_id), user_id=str(user.id))
+    return {"user_message": user_message, "assistant_message": assistant_message}
