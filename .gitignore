@@ -236,3 +236,6 @@ services/notifications/generated/
 services/agentic/chroma_db/
 services/agentic/checkpoints.db
 services/agentic/uploads/*
+
+# Git worktrees
+.worktrees/
