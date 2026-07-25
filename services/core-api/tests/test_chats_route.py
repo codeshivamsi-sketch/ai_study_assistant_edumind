@@ -75,6 +75,15 @@ async def test_list_chats_newest_first():
         ids = [c["id"] for c in response.json()]
         assert ids.index(second["id"]) < ids.index(first["id"])
 
+        # Verify cross-user isolation: Bob's chat should not appear in Alice's list
+        bob_document = await create_document(client, BOB_ID, "Bob's doc")
+        bob_chat = await create_chat(client, BOB_ID, bob_document["id"], "Bob's chat")
+
+        response = await client.get("/chats", headers=auth(ALICE_ID))
+        assert response.status_code == 200
+        ids = [c["id"] for c in response.json()]
+        assert bob_chat["id"] not in ids
+
 
 @pytest.mark.asyncio
 async def test_create_message_happy_path(monkeypatch):
