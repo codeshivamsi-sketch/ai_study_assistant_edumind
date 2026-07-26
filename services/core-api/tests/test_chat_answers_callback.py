@@ -5,6 +5,8 @@ from main import app
 
 ALICE_ID = "11111111-1111-1111-1111-111111111111"
 
+INTERNAL_TOKEN_HEADER = {"X-Internal-Token": "dev-internal-token"}
+
 
 def auth(user_id: str) -> dict:
     return {"X-User-Id": user_id}
@@ -68,6 +70,7 @@ async def test_callback_inserts_assistant_message_for_answer_intent(monkeypatch)
                 "message_id": user_message["id"],
                 "result": {"intent": "answer", "answer": "This document is about photosynthesis."},
             },
+            headers=INTERNAL_TOKEN_HEADER,
         )
         assert response.status_code == 200
 
@@ -100,6 +103,7 @@ async def test_callback_creates_quiz_row_for_quiz_intent(monkeypatch):
                     "quiz_questions": ["Q1: What is a cell?"],
                 },
             },
+            headers=INTERNAL_TOKEN_HEADER,
         )
         assert response.status_code == 200
 
@@ -118,5 +122,26 @@ async def test_callback_404s_for_nonexistent_chat():
                 "message_id": "99999999-9999-9999-9999-999999999999",
                 "result": {"intent": "answer", "answer": "x"},
             },
+            headers=INTERNAL_TOKEN_HEADER,
         )
         assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_callback_401s_with_wrong_or_missing_token():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        payload = {
+            "chat_id": "99999999-9999-9999-9999-999999999999",
+            "message_id": "99999999-9999-9999-9999-999999999999",
+            "result": {"intent": "answer", "answer": "x"},
+        }
+
+        response = await client.post("/internal/chat-answers", json=payload)
+        assert response.status_code == 401
+
+        response = await client.post(
+            "/internal/chat-answers",
+            json=payload,
+            headers={"X-Internal-Token": "wrong-token"},
+        )
+        assert response.status_code == 401

@@ -1,9 +1,10 @@
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Header
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from pydantic import BaseModel
 from typing import Any, Optional
 import json
+import os
 import uuid
 
 from database import get_db
@@ -277,6 +278,8 @@ async def create_message(
 
 # ---- Internal callbacks ----
 
+INTERNAL_CALLBACK_TOKEN = os.getenv("INTERNAL_CALLBACK_TOKEN", "dev-internal-token")
+
 class ChatAnswerCallbackRequest(BaseModel):
     chat_id: uuid.UUID
     message_id: uuid.UUID
@@ -292,7 +295,11 @@ def _extract_answer(result: dict) -> str:
 async def receive_chat_answer(
     request: ChatAnswerCallbackRequest,
     db: AsyncSession = Depends(get_db),
+    x_internal_token: str = Header(None, alias="X-Internal-Token"),
 ):
+    if x_internal_token != INTERNAL_CALLBACK_TOKEN:
+        raise HTTPException(status_code=401, detail="Invalid internal token")
+
     chat = await db.get(Chat, request.chat_id)
     if not chat:
         raise HTTPException(status_code=404, detail="Chat not found")

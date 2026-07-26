@@ -1,3 +1,5 @@
+import pytest
+
 import core.jobs
 
 
@@ -11,9 +13,10 @@ def test_run_agent_job_posts_result_to_callback(monkeypatch):
         def raise_for_status(self):
             pass
 
-    def fake_post(url, json, timeout):
+    def fake_post(url, json, headers, timeout):
         posted["url"] = url
         posted["json"] = json
+        posted["headers"] = headers
         return FakeResponse()
 
     monkeypatch.setattr("core.jobs.httpx.post", fake_post)
@@ -30,19 +33,19 @@ def test_run_agent_job_posts_result_to_callback(monkeypatch):
     assert posted["json"]["message_id"] == "33333333-3333-3333-3333-333333333333"
     assert posted["json"]["result"]["answer"] == "Paris is the capital of France."
     assert "thread_id" in posted["json"]["result"]
+    assert posted["headers"] == {"X-Internal-Token": core.jobs.INTERNAL_CALLBACK_TOKEN}
 
 
-def test_run_agent_job_swallows_callback_failure(monkeypatch, capsys):
+def test_run_agent_job_reraises_after_logging_callback_failure(monkeypatch, capsys):
     monkeypatch.setattr("core.jobs.agent.invoke", lambda state, config: {"answer": "x"})
 
-    def failing_post(url, json, timeout):
+    def failing_post(url, json, headers, timeout):
         raise ConnectionError("core-api unreachable")
 
     monkeypatch.setattr("core.jobs.httpx.post", failing_post)
 
-    core.jobs.run_agent_job(
-        question="q", document_id="d", chat_id="c", message_id="m"
-    )  # must not raise
+    with pytest.raises(ConnectionError):
+        core.jobs.run_agent_job(question="q", document_id="d", chat_id="c", message_id="m")
 
     captured = capsys.readouterr()
     assert "chat_answer_callback_failed" in captured.out

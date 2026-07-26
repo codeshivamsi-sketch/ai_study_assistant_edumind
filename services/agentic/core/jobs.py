@@ -4,6 +4,7 @@ import httpx
 from agents.agents import agent
 
 CORE_API_CALLBACK_URL = os.getenv("CORE_API_CALLBACK_URL", "http://localhost:8000")
+INTERNAL_CALLBACK_TOKEN = os.getenv("INTERNAL_CALLBACK_TOKEN", "dev-internal-token")
 
 
 def run_agent_job(question: str, document_id: str, chat_id: str, message_id: str) -> None:
@@ -17,7 +18,13 @@ def run_agent_job(question: str, document_id: str, chat_id: str, message_id: str
         "result": {**result, "thread_id": thread_id},
     }
     try:
-        response = httpx.post(f"{CORE_API_CALLBACK_URL}/internal/chat-answers", json=payload, timeout=30)
+        response = httpx.post(
+            f"{CORE_API_CALLBACK_URL}/internal/chat-answers",
+            json=payload,
+            headers={"X-Internal-Token": INTERNAL_CALLBACK_TOKEN},
+            timeout=30,
+        )
         response.raise_for_status()
     except Exception as exc:
         print(f"chat_answer_callback_failed chat_id={chat_id} message_id={message_id} error={exc}")
+        raise

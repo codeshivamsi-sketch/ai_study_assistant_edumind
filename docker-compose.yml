@@ -36,6 +36,7 @@ services:
       REDIS_URL: redis://redis:6379/0
       NOTIFICATIONS_GRPC_URL: notifications:5001
       AGENTIC_SERVICE_URL: http://agentic:8000
+      INTERNAL_CALLBACK_TOKEN: change-me-in-production
     command: >
       sh -c "alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port 8000"
 
@@ -116,6 +117,7 @@ services:
       NEO4J_PASSWORD: password
       AGENTIC_REDIS_URL: redis://redis:6379/2
       CORE_API_CALLBACK_URL: http://core-api:8000
+      INTERNAL_CALLBACK_TOKEN: change-me-in-production
     depends_on:
       neo4j:
         condition: service_healthy
