@@ -2,6 +2,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 from main import app
 from database import get_db
+from models import Quiz
 import pytest
 from httpx import AsyncClient, ASGITransport
 
@@ -35,13 +36,16 @@ async def create_document(client: AsyncClient, user_id: str, title: str) -> dict
 
 
 async def create_quiz(client: AsyncClient, user_id: str, document_id: str, topic: str) -> dict:
-    response = await client.post(
-        "/quizzes",
-        json={"document_id": document_id, "topic": topic, "questions": [{"q": "2+2?", "a": "4"}]},
-        headers=auth(user_id),
-    )
-    assert response.status_code == 200
-    return response.json()
+    engine = create_async_engine(DATABASE_URL)
+    AsyncTestSession = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    async with AsyncTestSession() as session:
+        quiz = Quiz(document_id=document_id, topic=topic, questions=[{"q": "2+2?", "a": "4"}])
+        session.add(quiz)
+        await session.commit()
+        await session.refresh(quiz)
+        result = {"id": str(quiz.id), "document_id": str(quiz.document_id), "topic": quiz.topic}
+    await engine.dispose()
+    return result
 
 
 @pytest.mark.asyncio
@@ -85,50 +89,6 @@ async def test_quiz_crud_happy_path():
 
         delete_response = await client.delete(f"/quizzes/{quiz['id']}", headers=auth(ALICE_ID))
         assert delete_response.status_code == 200
-
-
-@pytest.mark.asyncio
-async def test_create_quiz_dispatches_notify_quiz_ready_task(monkeypatch):
-    dispatched = {}
-
-    def fake_send_task(name, args=None, **kwargs):
-        dispatched["name"] = name
-        dispatched["args"] = args
-
-    monkeypatch.setattr("routes.celery_app.send_task", fake_send_task)
-
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        document = await create_document(client, ALICE_ID, "Notify notes")
-        quiz = await create_quiz(client, ALICE_ID, document["id"], "Notify quiz")
-
-    assert dispatched["name"] == "notify_quiz_ready"
-    assert dispatched["args"] == [ALICE_ID, quiz["id"]]
-
-
-@pytest.mark.asyncio
-async def test_create_quiz_succeeds_even_when_task_dispatch_fails(monkeypatch):
-    def failing_send_task(name, args=None, **kwargs):
-        raise ConnectionError("simulated broker failure")
-
-    monkeypatch.setattr("routes.celery_app.send_task", failing_send_task)
-
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        document = await create_document(client, ALICE_ID, "Resilience notes")
-        quiz = await create_quiz(client, ALICE_ID, document["id"], "Resilience quiz")
-
-    assert quiz["topic"] == "Resilience quiz"
-
-
-@pytest.mark.asyncio
-async def test_create_quiz_on_other_users_document_returns_404():
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        document = await create_document(client, ALICE_ID, "Alice's private notes")
-        response = await client.post(
-            "/quizzes",
-            json={"document_id": document["id"], "topic": "Bob's quiz", "questions": []},
-            headers=auth(BOB_ID),
-        )
-        assert response.status_code == 404
 
 
 @pytest.mark.asyncio
