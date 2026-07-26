@@ -294,7 +294,7 @@ async def list_messages(
     )
     return result.scalars().all()
 
-@router.post("/chats/{chat_id}/messages")
+@router.post("/chats/{chat_id}/messages", status_code=202)
 async def create_message(
     chat_id: uuid.UUID,
     request: MessageCreateRequest,
@@ -308,17 +308,13 @@ async def create_message(
     await db.refresh(user_message)
 
     try:
-        answer = await ask_question(str(chat.document_id), request.content)
+        await request_answer(str(chat_id), str(user_message.id), str(chat.document_id), request.content)
     except Exception as e:
-        log.warning("chat_message_agentic_failed", chat_id=str(chat_id), error=str(e))
-        raise HTTPException(status_code=502, detail="Failed to get an answer")
+        log.warning("chat_message_agentic_dispatch_failed", chat_id=str(chat_id), error=str(e))
+        raise HTTPException(status_code=502, detail="Failed to dispatch question to agentic")
 
-    assistant_message = Message(chat_id=chat_id, role="assistant", content=answer)
-    db.add(assistant_message)
-    await db.commit()
-    await db.refresh(assistant_message)
-    log.info("chat_message_created", chat_id=str(chat_id), user_id=str(user.id))
-    return {"user_message": user_message, "assistant_message": assistant_message}
+    log.info("chat_message_dispatched", chat_id=str(chat_id), user_id=str(user.id))
+    return {"user_message": user_message}
 
 # ---- Internal callbacks ----
 

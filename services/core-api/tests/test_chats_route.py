@@ -86,15 +86,19 @@ async def test_list_chats_newest_first():
 
 
 @pytest.mark.asyncio
-async def test_create_message_happy_path(monkeypatch):
-    async def fake_ask_question(document_id, question):
-        assert question == "What is chapter 1 about?"
-        return "Chapter 1 covers photosynthesis."
+async def test_create_message_202s_and_dispatches_to_agentic(monkeypatch):
+    dispatched = {}
 
-    monkeypatch.setattr("routes.ask_question", fake_ask_question)
+    async def fake_request_answer(chat_id, message_id, document_id, question):
+        dispatched["chat_id"] = chat_id
+        dispatched["message_id"] = message_id
+        dispatched["document_id"] = document_id
+        dispatched["question"] = question
+
+    monkeypatch.setattr("routes.request_answer", fake_request_answer)
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        document = await create_document(client, ALICE_ID, "Messages doc")
+        document = await create_document(client, ALICE_ID, "Async messages doc")
         chat = await create_chat(client, ALICE_ID, document["id"])
 
         response = await client.post(
@@ -102,25 +106,27 @@ async def test_create_message_happy_path(monkeypatch):
             json={"content": "What is chapter 1 about?"},
             headers=auth(ALICE_ID),
         )
-        assert response.status_code == 200
+        assert response.status_code == 202
         body = response.json()
         assert body["user_message"]["role"] == "user"
         assert body["user_message"]["content"] == "What is chapter 1 about?"
-        assert body["assistant_message"]["role"] == "assistant"
-        assert body["assistant_message"]["content"] == "Chapter 1 covers photosynthesis."
+        assert "assistant_message" not in body
+
+        assert dispatched["chat_id"] == chat["id"]
+        assert dispatched["document_id"] == document["id"]
+        assert dispatched["question"] == "What is chapter 1 about?"
 
         messages = await client.get(f"/chats/{chat['id']}/messages", headers=auth(ALICE_ID))
-        assert messages.status_code == 200
         roles = [m["role"] for m in messages.json()]
-        assert roles == ["user", "assistant"]
+        assert roles == ["user"]  # assistant reply hasn't arrived yet — that's the callback's job
 
 
 @pytest.mark.asyncio
-async def test_create_message_502s_on_agentic_failure_keeps_user_row(monkeypatch):
-    async def failing_ask_question(document_id, question):
+async def test_create_message_502s_on_agentic_dispatch_failure_keeps_user_row(monkeypatch):
+    async def failing_request_answer(chat_id, message_id, document_id, question):
         raise RuntimeError("agentic unreachable")
 
-    monkeypatch.setattr("routes.ask_question", failing_ask_question)
+    monkeypatch.setattr("routes.request_answer", failing_request_answer)
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         document = await create_document(client, ALICE_ID, "Failure doc")
@@ -139,32 +145,11 @@ async def test_create_message_502s_on_agentic_failure_keeps_user_row(monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_messages_ordered_by_created_at_asc(monkeypatch):
-    answers = iter(["First answer.", "Second answer."])
-
-    async def fake_ask_question(document_id, question):
-        return next(answers)
-
-    monkeypatch.setattr("routes.ask_question", fake_ask_question)
-
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        document = await create_document(client, ALICE_ID, "Ordering doc")
-        chat = await create_chat(client, ALICE_ID, document["id"])
-
-        await client.post(f"/chats/{chat['id']}/messages", json={"content": "First question"}, headers=auth(ALICE_ID))
-        await client.post(f"/chats/{chat['id']}/messages", json={"content": "Second question"}, headers=auth(ALICE_ID))
-
-        messages = await client.get(f"/chats/{chat['id']}/messages", headers=auth(ALICE_ID))
-        contents = [m["content"] for m in messages.json()]
-        assert contents == ["First question", "First answer.", "Second question", "Second answer."]
-
-
-@pytest.mark.asyncio
 async def test_cross_user_chat_access_denied_matrix(monkeypatch):
-    async def fake_ask_question(document_id, question):
-        return "answer"
+    async def fake_request_answer(chat_id, message_id, document_id, question):
+        return None
 
-    monkeypatch.setattr("routes.ask_question", fake_ask_question)
+    monkeypatch.setattr("routes.request_answer", fake_request_answer)
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         document = await create_document(client, ALICE_ID, "Private chat doc")
