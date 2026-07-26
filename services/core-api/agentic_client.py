@@ -1,4 +1,3 @@
-import json
 import os
 import httpx
 
@@ -15,20 +14,14 @@ async def upload_document(document_id: str, filename: str, content: bytes) -> No
         response.raise_for_status()
 
 
-async def ask_question(document_id: str, question: str) -> str:
-    async with httpx.AsyncClient(timeout=60) as client:
-        response = await client.post(
-            f"{AGENTIC_SERVICE_URL}/agent",
-            json={"question": question, "document_id": document_id},
-        )
-        response.raise_for_status()
-        data = response.json()
-    answer = data.get("answer")
-    if answer is not None:
-        return answer
-    return json.dumps({k: v for k, v in data.items() if k not in ("question", "document_id")})
-
-
+# ponytail: request_quiz kept here (not deleted per the brief's literal Step 1)
+# because worker.py's already-merged `generate_quiz` Celery task still calls
+# it and test_worker_generate_quiz.py still exercises that task; the brief's
+# own rationale for deleting it is "its only caller is removed in Task 5" --
+# deleting it now, before Task 5 removes that caller, would break the entire
+# suite's import chain (main -> routes -> worker -> agentic_client), not just
+# the message tests the brief anticipated. Delete alongside Task 5's removal
+# of generate_quiz/request_quiz's caller.
 def request_quiz(document_id: str, topic: str) -> list:
     response = httpx.post(
         f"{AGENTIC_SERVICE_URL}/agent",
@@ -37,3 +30,17 @@ def request_quiz(document_id: str, topic: str) -> list:
     )
     response.raise_for_status()
     return response.json()["quiz_questions"]
+
+
+async def request_answer(chat_id: str, message_id: str, document_id: str, question: str) -> None:
+    async with httpx.AsyncClient(timeout=10) as client:
+        response = await client.post(
+            f"{AGENTIC_SERVICE_URL}/agent",
+            json={
+                "question": question,
+                "document_id": document_id,
+                "chat_id": chat_id,
+                "message_id": message_id,
+            },
+        )
+        response.raise_for_status()

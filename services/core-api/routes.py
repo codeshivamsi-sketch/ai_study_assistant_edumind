@@ -3,6 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from pydantic import BaseModel
 from typing import Any, Optional
+import json
 import uuid
 
 from database import get_db
@@ -10,7 +11,7 @@ from identity import get_current_user
 from models import User, Document, Quiz, QuizAttempt, Chat, Message
 from logger import log
 from worker import celery_app
-from agentic_client import upload_document, ask_question
+from agentic_client import upload_document, request_answer
 
 router = APIRouter()
 
@@ -318,3 +319,58 @@ async def create_message(
     await db.refresh(assistant_message)
     log.info("chat_message_created", chat_id=str(chat_id), user_id=str(user.id))
     return {"user_message": user_message, "assistant_message": assistant_message}
+
+# ---- Internal callbacks ----
+
+class ChatAnswerCallbackRequest(BaseModel):
+    chat_id: uuid.UUID
+    message_id: uuid.UUID
+    result: dict
+
+def _extract_answer(result: dict) -> str:
+    answer = result.get("answer")
+    if answer is not None:
+        return answer
+    return json.dumps({k: v for k, v in result.items() if k not in ("question", "document_id")})
+
+@router.post("/internal/chat-answers")
+async def receive_chat_answer(
+    request: ChatAnswerCallbackRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    chat = await db.get(Chat, request.chat_id)
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat not found")
+
+    answer = _extract_answer(request.result)
+    assistant_message = Message(chat_id=request.chat_id, role="assistant", content=answer)
+    db.add(assistant_message)
+
+    quiz = None
+    if request.result.get("intent") == "quiz":
+        quiz = Quiz(
+            document_id=chat.document_id,
+            topic=request.result.get("question", "Chat quiz"),
+            questions=request.result.get("quiz_questions", []),
+        )
+        db.add(quiz)
+
+    await db.commit()
+    await db.refresh(assistant_message)
+    if quiz:
+        await db.refresh(quiz)
+
+    try:
+        celery_app.send_task(
+            "notify_quiz_ready",
+            args=[str(chat.user_id)],
+            kwargs={
+                "quiz_id": str(quiz.id) if quiz else None,
+                "chat_id": str(request.chat_id),
+                "message_id": str(assistant_message.id),
+            },
+        )
+    except Exception as e:
+        log.warning("chat_answer_notify_dispatch_failed", chat_id=str(request.chat_id), error=str(e))
+
+    return {"received": True}
