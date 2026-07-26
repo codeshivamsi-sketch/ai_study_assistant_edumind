@@ -18,7 +18,12 @@ export async function registerRoutes(app: FastifyInstance) {
 
   app.post("/notifications", async (request, reply) => {
     const body = createNotificationSchema.parse(request.body);
-    await enqueueNotifyQuizReady({ ...body, user_id: request.user!.id });
+    await enqueueNotifyQuizReady({
+      ...body,
+      chat_id: null,
+      message_id: null,
+      user_id: request.user!.id,
+    });
     return reply.code(202).send({ enqueued: true });
   });
 

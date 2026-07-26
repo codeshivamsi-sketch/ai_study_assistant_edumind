@@ -18,7 +18,9 @@ const proto = grpc.loadPackageDefinition(packageDefinition) as any;
 
 interface NotifyQuizReadyRequest {
   user_id: string;
-  quiz_id: string;
+  quiz_id?: string;
+  chat_id?: string;
+  message_id?: string;
 }
 
 interface NotifyQuizReadyResponse {
@@ -29,12 +31,14 @@ async function notifyQuizReady(
   call: grpc.ServerUnaryCall<NotifyQuizReadyRequest, NotifyQuizReadyResponse>,
   callback: grpc.sendUnaryData<NotifyQuizReadyResponse>
 ) {
-  const { user_id, quiz_id } = call.request;
+  const { user_id, quiz_id, chat_id, message_id } = call.request;
   try {
     await enqueueNotifyQuizReady({
       user_id,
-      quiz_id,
-      message: "Your quiz is ready!",
+      quiz_id: quiz_id || null,
+      chat_id: chat_id || null,
+      message_id: message_id || null,
+      message: quiz_id ? "Your quiz is ready!" : "You have a new chat answer!",
     });
     callback(null, { accepted: true });
   } catch (err) {

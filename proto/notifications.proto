@@ -8,7 +8,9 @@ service NotificationService {
 
 message NotifyQuizReadyRequest {
   string user_id = 1;
-  string quiz_id = 2;
+  optional string quiz_id = 2;
+  optional string chat_id = 3;
+  optional string message_id = 4;
 }
 
 message NotifyQuizReadyResponse {

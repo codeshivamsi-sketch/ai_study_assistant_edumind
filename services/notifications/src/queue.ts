@@ -9,7 +9,9 @@ export const NOTIFY_QUIZ_READY_QUEUE = "NotifyQuizReady";
 
 export interface NotifyQuizReadyPayload {
   user_id: string;
-  quiz_id: string;
+  quiz_id: string | null;
+  chat_id: string | null;
+  message_id: string | null;
   message: string;
 }
 

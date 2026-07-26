@@ -23,9 +23,9 @@ celery_app = Celery(
 
 
 @celery_app.task(bind=True, max_retries=3, name="notify_quiz_ready")
-def notify_quiz_ready(self, user_id, quiz_id):
+def notify_quiz_ready(self, user_id, quiz_id=None, chat_id=None, message_id=None):
     try:
-        send_grpc_notification(user_id, quiz_id)
+        send_grpc_notification(user_id, quiz_id=quiz_id, chat_id=chat_id, message_id=message_id)
     except Exception as exc:
         raise self.retry(exc=exc, countdown=RETRY_COUNTDOWN)
 

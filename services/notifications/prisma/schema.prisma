@@ -17,7 +17,9 @@ datasource db {
 model Notification {
   id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   user_id    String   @db.Uuid
-  quiz_id    String   @db.Uuid
+  quiz_id    String?  @db.Uuid
+  chat_id    String?  @db.Uuid
+  message_id String?  @db.Uuid
   message    String
   read       Boolean  @default(false)
   created_at DateTime @default(now())

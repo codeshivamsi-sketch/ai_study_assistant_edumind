@@ -4,7 +4,7 @@ from worker import notify_quiz_ready
 def test_notify_quiz_ready_calls_grpc_client(monkeypatch):
     called = {}
 
-    def fake_send(user_id, quiz_id):
+    def fake_send(user_id, quiz_id=None, chat_id=None, message_id=None):
         called["user_id"] = user_id
         called["quiz_id"] = quiz_id
 

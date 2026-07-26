@@ -4,9 +4,9 @@ import { prisma } from "../db";
 import { logger } from "../logger";
 
 export async function processNotifyQuizReady(job: Job<NotifyQuizReadyPayload>) {
-  const { user_id, quiz_id, message } = job.data;
+  const { user_id, quiz_id, chat_id, message_id, message } = job.data;
   await prisma.notification.create({
-    data: { user_id, quiz_id, message },
+    data: { user_id, quiz_id, chat_id, message_id, message },
   });
 }
 
