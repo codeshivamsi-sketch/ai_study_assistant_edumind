@@ -1,12 +1,12 @@
-from fastapi import FastAPI, UploadFile, File, Form
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 import os
 from typing import Optional
 from core.ingest import save_pdf_on_disk, get_pdf_content, split_content_into_chunks, embed_chunks, store_in_chroma, ingest_graph
 from core.query import embed_ques, get_searched_chunks_from_chroma, get_ans_from_claud, get_related_from_graph
 import chromadb
 from core.model import QueryRequest, AgentRequest, EvaluateRequest
+from core.queue_client import job_queue
 from agents.agents import agent, evaluator_node
-import uuid
 
 app = FastAPI()
 
@@ -40,12 +40,18 @@ def query_endpoint(request: QueryRequest):
     }
 
 
-@app.post("/agent")
+@app.post("/agent", status_code=202)
 def agent_endpoint(request: AgentRequest):
-    thread_id = str(uuid.uuid4())
-    config = {"configurable": {"thread_id": thread_id}}
-    result = agent.invoke({"question": request.question, "document_id": request.document_id}, config=config)
-    return {**result, "thread_id": thread_id}
+    if not request.chat_id or not request.message_id:
+        raise HTTPException(status_code=400, detail="chat_id and message_id are required")
+    job_queue.enqueue(
+        "core.jobs.run_agent_job",
+        request.question,
+        request.document_id,
+        request.chat_id,
+        request.message_id,
+    )
+    return {"accepted": True}
 
 
 @app.post("/evaluate")

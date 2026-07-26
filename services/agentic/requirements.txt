@@ -16,3 +16,6 @@ langsmith
 ragas==0.1.21
 datasets
 langchain-community
+rq
+redis
+httpx

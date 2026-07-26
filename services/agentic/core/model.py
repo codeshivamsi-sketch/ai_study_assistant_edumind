@@ -22,6 +22,8 @@ class EduMindState(TypedDict):
 class AgentRequest(BaseModel):
     question: str
     document_id: Optional[str] = None
+    chat_id: Optional[str] = None
+    message_id: Optional[str] = None
 
 
 class EvaluateRequest(BaseModel):
