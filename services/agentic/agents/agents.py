@@ -1,3 +1,4 @@
+import json
 from langgraph.graph import StateGraph, END
 from core.config import anthropic_client
 from core.query import embed_ques, get_related_from_graph, get_searched_chunks_from_chroma, get_ans_from_claud
@@ -68,10 +69,16 @@ def evaluator_node(state: EduMindState):
     response = anthropic_client.messages.create(
         model="claude-opus-4-5",
         max_tokens=512,
-        system="You are an evaluator. Score the user's answer against the quiz questions and context. Give a score out of 10 and explain what was correct and what was missing.",
+        system=(
+            "You are an evaluator. Score the user's answer against the quiz questions "
+            "and context. Respond with ONLY a JSON object of the form "
+            '{"score": <number 0-10>, "feedback": "<what was correct and what was missing>"}, '
+            "no other text."
+        ),
         messages=[{"role": "user", "content": f"Quiz Questions:\n{quiz}\n\nUser Answer:\n{user_answer}\n\nContext:\n{context}"}]
     )
-    return {"evaluation": response.content[0].text}
+    parsed = json.loads(response.content[0].text)
+    return {"score": parsed["score"], "feedback": parsed["feedback"]}
 
 
 def route(state: EduMindState):

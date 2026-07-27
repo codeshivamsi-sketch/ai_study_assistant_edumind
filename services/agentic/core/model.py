@@ -16,7 +16,8 @@ class EduMindState(TypedDict):
     quiz_questions: List[str]
     summary: str
     user_answer: str
-    evaluation: str
+    score: float
+    feedback: str
 
 
 class AgentRequest(BaseModel):
