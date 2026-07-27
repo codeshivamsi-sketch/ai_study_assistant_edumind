@@ -6,7 +6,6 @@ from core.query import embed_ques, get_searched_chunks_from_chroma, get_ans_from
 import chromadb
 from core.model import QueryRequest, AgentRequest, EvaluateRequest
 from core.queue_client import job_queue
-from agents.agents import agent
 
 app = FastAPI()
 

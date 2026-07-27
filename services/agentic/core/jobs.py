@@ -37,7 +37,7 @@ def run_evaluate_job(thread_id: str, user_answer: str, chat_id: str, message_id:
     result = None
     for state in agent.stream(None, config=config):
         result = state
-    evaluation = result.get("evaluate", {})
+    evaluation = (result or {}).get("evaluate", {})
 
     payload = {
         "chat_id": chat_id,
