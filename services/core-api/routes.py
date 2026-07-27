@@ -12,7 +12,7 @@ from identity import get_current_user
 from models import User, Document, Quiz, QuizAttempt, Chat, Message
 from logger import log
 from worker import celery_app
-from agentic_client import upload_document, request_answer
+from agentic_client import upload_document, request_answer, request_evaluation
 
 router = APIRouter()
 
@@ -205,6 +205,8 @@ class ChatCreateRequest(BaseModel):
 
 class MessageCreateRequest(BaseModel):
     content: str
+    intent: Optional[str] = None
+    quiz_id: Optional[uuid.UUID] = None
 
 async def _get_owned_chat(chat_id: uuid.UUID, user: User, db: AsyncSession) -> Chat:
     result = await db.execute(
@@ -262,13 +264,27 @@ async def create_message(
     user: User = Depends(get_current_user),
 ):
     chat = await _get_owned_chat(chat_id, user, db)
+
+    quiz = None
+    if request.intent == "quiz_answer":
+        if request.quiz_id is None:
+            raise HTTPException(status_code=400, detail="quiz_id is required when intent is quiz_answer")
+        quiz = await _get_owned_quiz(request.quiz_id, user, db)
+        if quiz.thread_id is None:
+            raise HTTPException(status_code=409, detail="Quiz has no evaluation thread")
+
     user_message = Message(chat_id=chat_id, role="user", content=request.content)
     db.add(user_message)
     await db.commit()
     await db.refresh(user_message)
 
     try:
-        await request_answer(str(chat_id), str(user_message.id), str(chat.document_id), request.content)
+        if quiz is not None:
+            await request_evaluation(
+                str(quiz.thread_id), request.content, str(chat_id), str(user_message.id), str(quiz.id)
+            )
+        else:
+            await request_answer(str(chat_id), str(user_message.id), str(chat.document_id), request.content)
     except Exception as e:
         log.warning("chat_message_agentic_dispatch_failed", chat_id=str(chat_id), error=str(e))
         raise HTTPException(status_code=502, detail="Failed to dispatch question to agentic")
@@ -289,6 +305,9 @@ def _extract_answer(result: dict) -> str:
     answer = result.get("answer")
     if answer is not None:
         return answer
+    feedback = result.get("feedback")
+    if feedback is not None:
+        return feedback
     return json.dumps({k: v for k, v in result.items() if k not in ("question", "document_id")})
 
 @router.post("/internal/chat-answers")
@@ -314,20 +333,44 @@ async def receive_chat_answer(
             document_id=chat.document_id,
             topic=request.result.get("question", "Chat quiz"),
             questions=request.result.get("quiz_questions", []),
+            thread_id=request.result.get("thread_id"),
         )
         db.add(quiz)
+
+    attempt = None
+    if request.result.get("intent") == "quiz_answer":
+        quiz_id = request.result.get("quiz_id")
+        score = request.result.get("score")
+        result_quiz = await db.get(Quiz, quiz_id) if quiz_id else None
+        if result_quiz is None or result_quiz.document_id != chat.document_id or score is None:
+            log.warning(
+                "quiz_answer_callback_invalid_payload",
+                chat_id=str(request.chat_id),
+                quiz_id=quiz_id,
+            )
+            raise HTTPException(status_code=400, detail="Invalid quiz_answer payload")
+        attempt = QuizAttempt(
+            quiz_id=result_quiz.id,
+            user_id=chat.user_id,
+            answers={"feedback": request.result.get("feedback")},
+            score=score,
+        )
+        db.add(attempt)
 
     await db.commit()
     await db.refresh(assistant_message)
     if quiz:
         await db.refresh(quiz)
+    if attempt:
+        await db.refresh(attempt)
 
+    notify_quiz_id = str(quiz.id) if quiz else (str(attempt.quiz_id) if attempt else None)
     try:
         celery_app.send_task(
             "notify_quiz_ready",
             args=[str(chat.user_id)],
             kwargs={
-                "quiz_id": str(quiz.id) if quiz else None,
+                "quiz_id": notify_quiz_id,
                 "chat_id": str(request.chat_id),
                 "message_id": str(assistant_message.id),
             },

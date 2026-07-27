@@ -161,3 +161,122 @@ async def test_cross_user_chat_access_denied_matrix(monkeypatch):
                 f"/chats/{chat['id']}/messages", json={"content": "hijack"}, headers=auth(BOB_ID)
             )
         ).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_create_message_400s_when_quiz_answer_missing_quiz_id():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        document = await create_document(client, ALICE_ID, "Quiz answer doc")
+        chat = await create_chat(client, ALICE_ID, document["id"])
+
+        response = await client.post(
+            f"/chats/{chat['id']}/messages",
+            json={"content": "The answer is X.", "intent": "quiz_answer"},
+            headers=auth(ALICE_ID),
+        )
+        assert response.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_create_message_404s_when_quiz_id_not_owned():
+    from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+    from sqlalchemy.orm import sessionmaker
+    from database import DATABASE_URL
+    from models import Quiz
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        bob_document = await create_document(client, BOB_ID, "Bob's doc")
+
+        engine = create_async_engine(DATABASE_URL)
+        SessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+        async with SessionLocal() as session:
+            quiz = Quiz(document_id=bob_document["id"], topic="Bob's quiz", questions=[], thread_id="thread-1")
+            session.add(quiz)
+            await session.commit()
+            await session.refresh(quiz)
+            bob_quiz_id = str(quiz.id)
+        await engine.dispose()
+
+        alice_document = await create_document(client, ALICE_ID, "Alice's doc")
+        alice_chat = await create_chat(client, ALICE_ID, alice_document["id"])
+
+        response = await client.post(
+            f"/chats/{alice_chat['id']}/messages",
+            json={"content": "hijack", "intent": "quiz_answer", "quiz_id": bob_quiz_id},
+            headers=auth(ALICE_ID),
+        )
+        assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_create_message_409s_when_quiz_has_no_thread_id():
+    from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+    from sqlalchemy.orm import sessionmaker
+    from database import DATABASE_URL
+    from models import Quiz
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        document = await create_document(client, ALICE_ID, "Pre-migration doc")
+        chat = await create_chat(client, ALICE_ID, document["id"])
+
+        engine = create_async_engine(DATABASE_URL)
+        SessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+        async with SessionLocal() as session:
+            quiz = Quiz(document_id=document["id"], topic="No-thread quiz", questions=[])
+            session.add(quiz)
+            await session.commit()
+            await session.refresh(quiz)
+            quiz_id = str(quiz.id)
+        await engine.dispose()
+
+        response = await client.post(
+            f"/chats/{chat['id']}/messages",
+            json={"content": "The answer is X.", "intent": "quiz_answer", "quiz_id": quiz_id},
+            headers=auth(ALICE_ID),
+        )
+        assert response.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_create_message_dispatches_evaluation_for_quiz_answer_intent(monkeypatch):
+    from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+    from sqlalchemy.orm import sessionmaker
+    from database import DATABASE_URL
+    from models import Quiz
+
+    dispatched = {}
+
+    async def fake_request_evaluation(thread_id, user_answer, chat_id, message_id, quiz_id):
+        dispatched["thread_id"] = thread_id
+        dispatched["user_answer"] = user_answer
+        dispatched["chat_id"] = chat_id
+        dispatched["message_id"] = message_id
+        dispatched["quiz_id"] = quiz_id
+
+    monkeypatch.setattr("routes.request_evaluation", fake_request_evaluation)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        document = await create_document(client, ALICE_ID, "Quiz answer dispatch doc")
+        chat = await create_chat(client, ALICE_ID, document["id"])
+
+        engine = create_async_engine(DATABASE_URL)
+        SessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+        async with SessionLocal() as session:
+            quiz = Quiz(document_id=document["id"], topic="Alice's quiz", questions=[], thread_id="thread-abc")
+            session.add(quiz)
+            await session.commit()
+            await session.refresh(quiz)
+            quiz_id = str(quiz.id)
+        await engine.dispose()
+
+        response = await client.post(
+            f"/chats/{chat['id']}/messages",
+            json={"content": "It's the mitochondria.", "intent": "quiz_answer", "quiz_id": quiz_id},
+            headers=auth(ALICE_ID),
+        )
+        assert response.status_code == 202
+
+        assert dispatched["thread_id"] == "thread-abc"
+        assert dispatched["user_answer"] == "It's the mitochondria."
+        assert dispatched["chat_id"] == chat["id"]
+        assert dispatched["quiz_id"] == quiz_id

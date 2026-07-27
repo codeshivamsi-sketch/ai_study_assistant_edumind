@@ -6,7 +6,6 @@ from core.query import embed_ques, get_searched_chunks_from_chroma, get_ans_from
 import chromadb
 from core.model import QueryRequest, AgentRequest, EvaluateRequest
 from core.queue_client import job_queue
-from agents.agents import agent, evaluator_node
 
 app = FastAPI()
 
@@ -40,36 +39,14 @@ def agent_endpoint(request: AgentRequest):
     return {"accepted": True}
 
 
-@app.post("/evaluate")
+@app.post("/evaluate", status_code=202)
 def evaluate_endpoint(request: EvaluateRequest):
-    try:
-        config = {"configurable":{"thread_id":request.thread_id}}
-
-        current_state = agent.get_state(config)
-        print("Current state: ", current_state)
-        print("Next nodes:", current_state.next)
-
-        agent.update_state(
-            config,
-            {"user_answer":request.user_answer},
-            as_node="quiz"  # ← tells LangGraph this update comes from after quiz nod, — so it knows to run evaluate next, not restart from orchestrator.
-        )
-
-        # invoke() = give me the final answer
-        # stream() = give me updates as each step completes
-
-        print("Starting stream...")
-        result = None
-        for state in agent.stream( # stream() — runs graph and yields state after each node.
-            None,  # None means "don't start fresh, resume from interrupt point."
-            config=config
-        ):
-            print("State chunk:", state)
-            result=state
-        print("Stream done, result: ", result)
-
-        print("Final result:", result)
-        return {"evaluation":result.get("evaluate", {}).get("evaluation", "No evaluation")}
-    except Exception as e:
-        print("ERR: ", str(e))
-        raise e
+    job_queue.enqueue(
+        "core.jobs.run_evaluate_job",
+        request.thread_id,
+        request.user_answer,
+        request.chat_id,
+        request.message_id,
+        request.quiz_id,
+    )
+    return {"accepted": True}

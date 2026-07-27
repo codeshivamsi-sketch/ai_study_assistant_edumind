@@ -28,3 +28,35 @@ def run_agent_job(question: str, document_id: str, chat_id: str, message_id: str
     except Exception as exc:
         print(f"chat_answer_callback_failed chat_id={chat_id} message_id={message_id} error={exc}")
         raise
+
+
+def run_evaluate_job(thread_id: str, user_answer: str, chat_id: str, message_id: str, quiz_id: str) -> None:
+    config = {"configurable": {"thread_id": thread_id}}
+    agent.update_state(config, {"user_answer": user_answer}, as_node="quiz")
+
+    result = None
+    for state in agent.stream(None, config=config):
+        result = state
+    evaluation = (result or {}).get("evaluate", {})
+
+    payload = {
+        "chat_id": chat_id,
+        "message_id": message_id,
+        "result": {
+            "intent": "quiz_answer",
+            "quiz_id": quiz_id,
+            "score": evaluation.get("score"),
+            "feedback": evaluation.get("feedback"),
+        },
+    }
+    try:
+        response = httpx.post(
+            f"{CORE_API_CALLBACK_URL}/internal/chat-answers",
+            json=payload,
+            headers={"X-Internal-Token": INTERNAL_CALLBACK_TOKEN},
+            timeout=30,
+        )
+        response.raise_for_status()
+    except Exception as exc:
+        print(f"quiz_evaluation_callback_failed chat_id={chat_id} message_id={message_id} error={exc}")
+        raise

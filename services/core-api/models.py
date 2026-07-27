@@ -33,6 +33,7 @@ class Quiz(Base):
     document_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE"), index=True, nullable=False)
     topic: Mapped[str] = mapped_column(String, nullable=False)
     questions: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    thread_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 class QuizAttempt(Base):
