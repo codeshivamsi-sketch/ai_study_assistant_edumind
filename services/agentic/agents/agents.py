@@ -77,8 +77,12 @@ def evaluator_node(state: EduMindState):
         ),
         messages=[{"role": "user", "content": f"Quiz Questions:\n{quiz}\n\nUser Answer:\n{user_answer}\n\nContext:\n{context}"}]
     )
-    parsed = json.loads(response.content[0].text)
-    return {"score": parsed["score"], "feedback": parsed["feedback"]}
+    text = response.content[0].text
+    try:
+        parsed = json.loads(text)
+        return {"score": parsed["score"], "feedback": parsed["feedback"]}
+    except (json.JSONDecodeError, KeyError, TypeError):
+        return {"score": 0, "feedback": text}
 
 
 def route(state: EduMindState):
