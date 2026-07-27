@@ -26,20 +26,6 @@ async def upload_pdf(file: UploadFile = File(...), document_id: Optional[str] = 
     return {"filename": file.filename, "chunks": len(chunks), "document_id": document_id}
 
 
-@app.post("/query")
-def query_endpoint(request: QueryRequest):
-    question = request.question
-    question_embedding = embed_ques(question)
-    chunks = get_searched_chunks_from_chroma(question_embedding, request.document_id)
-    graph_concepts = get_related_from_graph(question)
-    response = get_ans_from_claud(question, chunks, graph_concepts)
-    return {
-        "answer": response.content[0].text,
-        "source_chunks": chunks,
-        "related_concepts": graph_concepts
-    }
-
-
 @app.post("/agent", status_code=202)
 def agent_endpoint(request: AgentRequest):
     if not request.chat_id or not request.message_id:
