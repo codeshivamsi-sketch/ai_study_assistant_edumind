@@ -12,7 +12,7 @@ from identity import get_current_user
 from models import User, Document, Quiz, QuizAttempt, Chat, Message
 from logger import log
 from worker import celery_app
-from agentic_client import upload_document, request_answer
+from agentic_client import upload_document, request_answer, request_evaluation
 
 router = APIRouter()
 
@@ -205,6 +205,8 @@ class ChatCreateRequest(BaseModel):
 
 class MessageCreateRequest(BaseModel):
     content: str
+    intent: Optional[str] = None
+    quiz_id: Optional[uuid.UUID] = None
 
 async def _get_owned_chat(chat_id: uuid.UUID, user: User, db: AsyncSession) -> Chat:
     result = await db.execute(
@@ -262,13 +264,25 @@ async def create_message(
     user: User = Depends(get_current_user),
 ):
     chat = await _get_owned_chat(chat_id, user, db)
+
+    quiz = None
+    if request.intent == "quiz_answer":
+        if request.quiz_id is None:
+            raise HTTPException(status_code=400, detail="quiz_id is required when intent is quiz_answer")
+        quiz = await _get_owned_quiz(request.quiz_id, user, db)
+
     user_message = Message(chat_id=chat_id, role="user", content=request.content)
     db.add(user_message)
     await db.commit()
     await db.refresh(user_message)
 
     try:
-        await request_answer(str(chat_id), str(user_message.id), str(chat.document_id), request.content)
+        if quiz is not None:
+            await request_evaluation(
+                str(quiz.thread_id), request.content, str(chat_id), str(user_message.id), str(quiz.id)
+            )
+        else:
+            await request_answer(str(chat_id), str(user_message.id), str(chat.document_id), request.content)
     except Exception as e:
         log.warning("chat_message_agentic_dispatch_failed", chat_id=str(chat_id), error=str(e))
         raise HTTPException(status_code=502, detail="Failed to dispatch question to agentic")

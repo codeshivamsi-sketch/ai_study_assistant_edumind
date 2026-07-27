@@ -26,3 +26,20 @@ async def request_answer(chat_id: str, message_id: str, document_id: str, questi
             },
         )
         response.raise_for_status()
+
+
+async def request_evaluation(
+    thread_id: str, user_answer: str, chat_id: str, message_id: str, quiz_id: str
+) -> None:
+    async with httpx.AsyncClient(timeout=10) as client:
+        response = await client.post(
+            f"{AGENTIC_SERVICE_URL}/evaluate",
+            json={
+                "thread_id": thread_id,
+                "user_answer": user_answer,
+                "chat_id": chat_id,
+                "message_id": message_id,
+                "quiz_id": quiz_id,
+            },
+        )
+        response.raise_for_status()
