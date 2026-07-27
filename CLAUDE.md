@@ -37,17 +37,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Tool routing
 - Before creating any new function or utility: query codegraph — does it already exist?
-- Before refactoring anything shared: run /blast on the affected files
 - Any non-trivial feature: plan first (Superpowers)
 
-## Where the "why" lives
-- Decisions: `docs/adr/` — read before refactoring anything structural
-- Architecture map: `docs/architecture.md` (regenerate with /arch)
-- Blast-radius snapshots: `docs/blast/`
-- Module intent: `services/core-api/README.md` (doesn't exist yet — this repo's README.md at the root is currently the only architecture writeup)
+## Decisions
+- Document upload (`POST /documents/{id}/upload`) stays synchronous — it calls the agentic service inline and waits, no Celery/async job. Considered and explicitly deferred; revisit only if upload latency becomes a real problem.
+- `agentic` was consolidated into this monorepo from a standalone RAG-assistant repo as `services/agentic`, with its own Dockerfile — it listens on host port 8002 because container port 8000 collides with `core-api`'s own 8000.
+- Neo4j was added as a new `docker-compose.yml` service because `agentic` has a hard, non-optional dependency on it; `chroma_db/`, the LangGraph SQLite checkpoint, and `uploads/` all get named volumes so on-disk state survives `docker-compose up --build`.
 
 ## Gotchas
-- Only one service exists (`services/core-api`) — there is no second service or shared-DB migration-table split to worry about anymore
+- This monorepo now runs more than `core-api`: `worker` (Celery), `notifications` (Fastify+gRPC, its own Prisma migrations), and `agentic` (FastAPI+LangGraph, port 8002, Chroma+Neo4j, no Alembic) all live under the root `docker-compose.yml`. `notifications` and `core-api` share the same Postgres database (`edumind`) but manage their own tables through separate migration tools (Prisma vs. Alembic) — one `alembic upgrade head` never covers `notifications`' schema.
 - Tests hit a real Postgres (`postgresql+asyncpg://edumind:edumind@localhost:5432/edumind`), not a mock or isolated test DB — `postgres` (at least) must be running via `make up`/`docker-compose up` for `pytest` to pass, and there's no rollback between tests; seeded test users (`alice@edumind.test` / `bob@edumind.test`, fixed UUIDs, see the seed migration) are expected to already exist
 - `ruff check .` reports pre-existing `F401` unused-import findings: `base.Base` in `database.py` (imported for side effects, not directly referenced), and the `User`/`Document`/`Quiz`/`QuizAttempt` imports in `migrations/env.py` (imported so `Base.metadata` picks them up for autogenerate, not directly referenced) — the PostToolUse hook will surface these on unrelated edits to those files
 - No mypy/pyright configured — nothing enforces the `Mapped[...]` type annotations beyond what SQLAlchemy itself checks at runtime
+- `docs/architecture.md` and `docs/blast/` are historical, point-in-time snapshots — the `/arch` and `/blast` commands that generated them were removed upstream; nothing regenerates them automatically anymore
+- No per-module READMEs exist yet (e.g. `services/core-api/README.md`) — this repo's root `README.md` is currently the only architecture writeup
