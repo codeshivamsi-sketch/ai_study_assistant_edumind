@@ -270,6 +270,8 @@ async def create_message(
         if request.quiz_id is None:
             raise HTTPException(status_code=400, detail="quiz_id is required when intent is quiz_answer")
         quiz = await _get_owned_quiz(request.quiz_id, user, db)
+        if quiz.thread_id is None:
+            raise HTTPException(status_code=409, detail="Quiz has no evaluation thread")
 
     user_message = Message(chat_id=chat_id, role="user", content=request.content)
     db.add(user_message)
@@ -337,11 +339,21 @@ async def receive_chat_answer(
 
     attempt = None
     if request.result.get("intent") == "quiz_answer":
+        quiz_id = request.result.get("quiz_id")
+        score = request.result.get("score")
+        result_quiz = await db.get(Quiz, quiz_id) if quiz_id else None
+        if result_quiz is None or result_quiz.document_id != chat.document_id or score is None:
+            log.warning(
+                "quiz_answer_callback_invalid_payload",
+                chat_id=str(request.chat_id),
+                quiz_id=quiz_id,
+            )
+            raise HTTPException(status_code=400, detail="Invalid quiz_answer payload")
         attempt = QuizAttempt(
-            quiz_id=request.result.get("quiz_id"),
+            quiz_id=result_quiz.id,
             user_id=chat.user_id,
             answers={"feedback": request.result.get("feedback")},
-            score=request.result.get("score"),
+            score=score,
         )
         db.add(attempt)
 

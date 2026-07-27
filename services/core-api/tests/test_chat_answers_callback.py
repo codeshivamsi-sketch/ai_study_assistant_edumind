@@ -210,3 +210,33 @@ async def test_callback_creates_quiz_attempt_for_quiz_answer_intent(monkeypatch)
 
     assert dispatched["kwargs"]["quiz_id"] == quiz["id"]
     assert dispatched["kwargs"]["chat_id"] == chat["id"]
+
+
+@pytest.mark.asyncio
+async def test_callback_400s_for_quiz_answer_with_unknown_quiz_id(monkeypatch):
+    monkeypatch.setattr("routes.celery_app.send_task", lambda *a, **k: None)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        document = await create_document(client, ALICE_ID, "Bad quiz-answer doc")
+        chat = await create_chat(client, ALICE_ID, document["id"])
+        user_message = await create_user_message(client, chat["id"], "A cell is the basic unit of life.")
+
+        response = await client.post(
+            "/internal/chat-answers",
+            json={
+                "chat_id": chat["id"],
+                "message_id": user_message["id"],
+                "result": {
+                    "intent": "quiz_answer",
+                    "quiz_id": "99999999-9999-9999-9999-999999999999",
+                    "score": 8,
+                    "feedback": "Correct and concise.",
+                },
+            },
+            headers=INTERNAL_TOKEN_HEADER,
+        )
+        assert response.status_code == 400
+
+        messages = await client.get(f"/chats/{chat['id']}/messages", headers=auth(ALICE_ID))
+        roles = [m["role"] for m in messages.json()]
+        assert "assistant" not in roles

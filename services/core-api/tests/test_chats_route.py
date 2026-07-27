@@ -209,6 +209,35 @@ async def test_create_message_404s_when_quiz_id_not_owned():
 
 
 @pytest.mark.asyncio
+async def test_create_message_409s_when_quiz_has_no_thread_id():
+    from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+    from sqlalchemy.orm import sessionmaker
+    from database import DATABASE_URL
+    from models import Quiz
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        document = await create_document(client, ALICE_ID, "Pre-migration doc")
+        chat = await create_chat(client, ALICE_ID, document["id"])
+
+        engine = create_async_engine(DATABASE_URL)
+        SessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+        async with SessionLocal() as session:
+            quiz = Quiz(document_id=document["id"], topic="No-thread quiz", questions=[])
+            session.add(quiz)
+            await session.commit()
+            await session.refresh(quiz)
+            quiz_id = str(quiz.id)
+        await engine.dispose()
+
+        response = await client.post(
+            f"/chats/{chat['id']}/messages",
+            json={"content": "The answer is X.", "intent": "quiz_answer", "quiz_id": quiz_id},
+            headers=auth(ALICE_ID),
+        )
+        assert response.status_code == 409
+
+
+@pytest.mark.asyncio
 async def test_create_message_dispatches_evaluation_for_quiz_answer_intent(monkeypatch):
     from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
     from sqlalchemy.orm import sessionmaker
