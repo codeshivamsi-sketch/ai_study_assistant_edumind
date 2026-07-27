@@ -289,6 +289,9 @@ def _extract_answer(result: dict) -> str:
     answer = result.get("answer")
     if answer is not None:
         return answer
+    feedback = result.get("feedback")
+    if feedback is not None:
+        return feedback
     return json.dumps({k: v for k, v in result.items() if k not in ("question", "document_id")})
 
 @router.post("/internal/chat-answers")
@@ -314,20 +317,34 @@ async def receive_chat_answer(
             document_id=chat.document_id,
             topic=request.result.get("question", "Chat quiz"),
             questions=request.result.get("quiz_questions", []),
+            thread_id=request.result.get("thread_id"),
         )
         db.add(quiz)
+
+    attempt = None
+    if request.result.get("intent") == "quiz_answer":
+        attempt = QuizAttempt(
+            quiz_id=request.result.get("quiz_id"),
+            user_id=chat.user_id,
+            answers={"feedback": request.result.get("feedback")},
+            score=request.result.get("score"),
+        )
+        db.add(attempt)
 
     await db.commit()
     await db.refresh(assistant_message)
     if quiz:
         await db.refresh(quiz)
+    if attempt:
+        await db.refresh(attempt)
 
+    notify_quiz_id = str(quiz.id) if quiz else (str(attempt.quiz_id) if attempt else None)
     try:
         celery_app.send_task(
             "notify_quiz_ready",
             args=[str(chat.user_id)],
             kwargs={
-                "quiz_id": str(quiz.id) if quiz else None,
+                "quiz_id": notify_quiz_id,
                 "chat_id": str(request.chat_id),
                 "message_id": str(assistant_message.id),
             },

@@ -145,3 +145,68 @@ async def test_callback_401s_with_wrong_or_missing_token():
             headers={"X-Internal-Token": "wrong-token"},
         )
         assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_callback_creates_quiz_attempt_for_quiz_answer_intent(monkeypatch):
+    dispatched = {}
+
+    def fake_send_task(name, args=None, kwargs=None):
+        dispatched["name"] = name
+        dispatched["args"] = args
+        dispatched["kwargs"] = kwargs
+
+    monkeypatch.setattr("routes.celery_app.send_task", fake_send_task)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        document = await create_document(client, ALICE_ID, "Quiz-answer doc")
+        chat = await create_chat(client, ALICE_ID, document["id"])
+
+        quiz_seed_message = await create_user_message(client, chat["id"], "Quiz me")
+        quiz_response = await client.post(
+            "/internal/chat-answers",
+            json={
+                "chat_id": chat["id"],
+                "message_id": quiz_seed_message["id"],
+                "result": {
+                    "intent": "quiz",
+                    "question": "Quiz me",
+                    "quiz_questions": ["Q1: What is a cell?"],
+                    "thread_id": "thread-xyz",
+                },
+            },
+            headers=INTERNAL_TOKEN_HEADER,
+        )
+        assert quiz_response.status_code == 200
+
+        quizzes = await client.get("/quizzes", headers=auth(ALICE_ID))
+        # Get the quiz created in this test (must match both topic and document)
+        quiz = next((q for q in quizzes.json() if q["topic"] == "Quiz me" and str(q["document_id"]) == str(document["id"])), None)
+        assert quiz is not None, "Quiz not found"
+
+        user_message = await create_user_message(client, chat["id"], "A cell is the basic unit of life.")
+        response = await client.post(
+            "/internal/chat-answers",
+            json={
+                "chat_id": chat["id"],
+                "message_id": user_message["id"],
+                "result": {
+                    "intent": "quiz_answer",
+                    "quiz_id": quiz["id"],
+                    "score": 8,
+                    "feedback": "Correct and concise.",
+                },
+            },
+            headers=INTERNAL_TOKEN_HEADER,
+        )
+        assert response.status_code == 200
+
+        messages = await client.get(f"/chats/{chat['id']}/messages", headers=auth(ALICE_ID))
+        contents = [(m["role"], m["content"]) for m in messages.json()]
+        assert ("assistant", "Correct and concise.") in contents
+
+        stats = await client.get(f"/quizzes/{quiz['id']}/stats", headers=auth(ALICE_ID))
+        assert stats.json() == {"avg_score": 8.0, "attempt_count": 1}
+
+    assert dispatched["kwargs"]["quiz_id"] == quiz["id"]
+    assert dispatched["kwargs"]["chat_id"] == chat["id"]
