@@ -30,3 +30,6 @@ class AgentRequest(BaseModel):
 class EvaluateRequest(BaseModel):
     thread_id: str
     user_answer: str
+    chat_id: str
+    message_id: str
+    quiz_id: str

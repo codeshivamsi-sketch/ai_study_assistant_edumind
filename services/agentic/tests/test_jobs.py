@@ -49,3 +49,65 @@ def test_run_agent_job_reraises_after_logging_callback_failure(monkeypatch, caps
 
     captured = capsys.readouterr()
     assert "chat_answer_callback_failed" in captured.out
+
+
+def test_run_evaluate_job_posts_result_to_callback(monkeypatch):
+    monkeypatch.setattr("core.jobs.agent.update_state", lambda config, values, as_node: None)
+    monkeypatch.setattr(
+        "core.jobs.agent.stream",
+        lambda inp, config: iter([{"evaluate": {"score": 8, "feedback": "Solid answer."}}]),
+    )
+
+    posted = {}
+
+    class FakeResponse:
+        def raise_for_status(self):
+            pass
+
+    def fake_post(url, json, headers, timeout):
+        posted["url"] = url
+        posted["json"] = json
+        posted["headers"] = headers
+        return FakeResponse()
+
+    monkeypatch.setattr("core.jobs.httpx.post", fake_post)
+
+    core.jobs.run_evaluate_job(
+        thread_id="thread-abc",
+        user_answer="Photosynthesis converts sunlight into energy.",
+        chat_id="22222222-2222-2222-2222-222222222222",
+        message_id="33333333-3333-3333-3333-333333333333",
+        quiz_id="44444444-4444-4444-4444-444444444444",
+    )
+
+    assert posted["url"] == "http://localhost:8000/internal/chat-answers"
+    assert posted["json"]["chat_id"] == "22222222-2222-2222-2222-222222222222"
+    assert posted["json"]["message_id"] == "33333333-3333-3333-3333-333333333333"
+    assert posted["json"]["result"] == {
+        "intent": "quiz_answer",
+        "quiz_id": "44444444-4444-4444-4444-444444444444",
+        "score": 8,
+        "feedback": "Solid answer.",
+    }
+    assert posted["headers"] == {"X-Internal-Token": core.jobs.INTERNAL_CALLBACK_TOKEN}
+
+
+def test_run_evaluate_job_reraises_after_logging_callback_failure(monkeypatch, capsys):
+    monkeypatch.setattr("core.jobs.agent.update_state", lambda config, values, as_node: None)
+    monkeypatch.setattr(
+        "core.jobs.agent.stream",
+        lambda inp, config: iter([{"evaluate": {"score": 5, "feedback": "x"}}]),
+    )
+
+    def failing_post(url, json, headers, timeout):
+        raise ConnectionError("core-api unreachable")
+
+    monkeypatch.setattr("core.jobs.httpx.post", failing_post)
+
+    with pytest.raises(ConnectionError):
+        core.jobs.run_evaluate_job(
+            thread_id="t", user_answer="a", chat_id="c", message_id="m", quiz_id="q"
+        )
+
+    captured = capsys.readouterr()
+    assert "quiz_evaluation_callback_failed" in captured.out
