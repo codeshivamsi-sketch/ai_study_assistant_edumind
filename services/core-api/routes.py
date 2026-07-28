@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Header
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form, Header
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from pydantic import BaseModel
@@ -18,10 +18,6 @@ router = APIRouter()
 
 # ---- Documents ----
 
-class DocumentCreateRequest(BaseModel):
-    title: str
-    status: str = "uploaded"
-
 class DocumentUpdateRequest(BaseModel):
     title: Optional[str] = None
     status: Optional[str] = None
@@ -37,15 +33,30 @@ async def _get_owned_document(document_id: uuid.UUID, user: User, db: AsyncSessi
 
 @router.post("/documents")
 async def create_document(
-    request: DocumentCreateRequest,
+    title: str = Form(...),
+    file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    document = Document(user_id=user.id, title=request.title, status=request.status)
+    document = Document(user_id=user.id, title=title, status="uploaded")
     db.add(document)
     await db.commit()
     await db.refresh(document)
-    log.info("document_created", document_id=str(document.id), user_id=str(user.id))
+
+    content = await file.read()
+    document.status = "processing"
+    await db.commit()
+    try:
+        await upload_document(str(document.id), file.filename, content)
+    except Exception as e:
+        document.status = "failed"
+        await db.commit()
+        log.warning("document_upload_failed", document_id=str(document.id), error=str(e))
+        raise HTTPException(status_code=502, detail="Document ingestion failed")
+    document.status = "ready"
+    await db.commit()
+    await db.refresh(document)
+    log.info("document_uploaded", document_id=str(document.id))
     return document
 
 @router.get("/documents")
@@ -83,30 +94,6 @@ async def delete_document(
     await db.delete(document)
     await db.commit()
     return {"deleted": True}
-
-@router.post("/documents/{document_id}/upload")
-async def upload_document_file(
-    document_id: uuid.UUID,
-    file: UploadFile = File(...),
-    db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
-    document = await _get_owned_document(document_id, user, db)
-    content = await file.read()
-    document.status = "processing"
-    await db.commit()
-    try:
-        await upload_document(str(document_id), file.filename, content)
-    except Exception as e:
-        document.status = "failed"
-        await db.commit()
-        log.warning("document_upload_failed", document_id=str(document_id), error=str(e))
-        raise HTTPException(status_code=502, detail="Document ingestion failed")
-    document.status = "ready"
-    await db.commit()
-    await db.refresh(document)
-    log.info("document_uploaded", document_id=str(document_id))
-    return document
 
 # ---- Quizzes ----
 
@@ -224,6 +211,12 @@ async def create_chat(
     user: User = Depends(get_current_user),
 ):
     document = await _get_owned_document(request.document_id, user, db)
+
+    existing = await db.execute(select(Chat).where(Chat.document_id == document.id))
+    chat = existing.scalar_one_or_none()
+    if chat:
+        return chat
+
     if document.status != "ready":
         raise HTTPException(status_code=409, detail="Document not ready for chat")
     chat = Chat(user_id=user.id, document_id=request.document_id, title=request.title)
@@ -308,6 +301,9 @@ def _extract_answer(result: dict) -> str:
     feedback = result.get("feedback")
     if feedback is not None:
         return feedback
+    summary = result.get("summary")
+    if summary is not None:
+        return summary
     return json.dumps({k: v for k, v in result.items() if k not in ("question", "document_id")})
 
 @router.post("/internal/chat-answers")
@@ -323,10 +319,6 @@ async def receive_chat_answer(
     if not chat:
         raise HTTPException(status_code=404, detail="Chat not found")
 
-    answer = _extract_answer(request.result)
-    assistant_message = Message(chat_id=request.chat_id, role="assistant", content=answer)
-    db.add(assistant_message)
-
     quiz = None
     if request.result.get("intent") == "quiz":
         quiz = Quiz(
@@ -336,8 +328,10 @@ async def receive_chat_answer(
             thread_id=request.result.get("thread_id"),
         )
         db.add(quiz)
+        await db.flush()  # assigns quiz.id before the message that references it
 
     attempt = None
+    result_quiz = None
     if request.result.get("intent") == "quiz_answer":
         quiz_id = request.result.get("quiz_id")
         score = request.result.get("score")
@@ -356,6 +350,15 @@ async def receive_chat_answer(
             score=score,
         )
         db.add(attempt)
+
+    answer = _extract_answer(request.result)
+    assistant_message = Message(
+        chat_id=request.chat_id,
+        role="assistant",
+        content=answer,
+        quiz_id=quiz.id if quiz else None,  # only the quiz-creation message gets the Answer/Stats CTA, not grading feedback
+    )
+    db.add(assistant_message)
 
     await db.commit()
     await db.refresh(assistant_message)

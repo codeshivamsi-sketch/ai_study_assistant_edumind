@@ -9,6 +9,7 @@
     "test": "npm run build && node --test 'dist/test/**/*.test.js'"
   },
   "dependencies": {
+    "@fastify/cors": "^10.0.0",
     "@grpc/grpc-js": "^1.11.0",
     "@grpc/proto-loader": "^0.7.13",
     "@prisma/client": "^6.1.0",

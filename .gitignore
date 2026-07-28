@@ -232,6 +232,10 @@ services/notifications/dist/
 services/notifications/proto/
 services/notifications/generated/
 
+# Node (frontend micro-frontends)
+frontend/*/node_modules/
+frontend/*/dist/
+
 # Agentic service (services/agentic) - runtime state, not source
 services/agentic/chroma_db/
 services/agentic/checkpoints.db

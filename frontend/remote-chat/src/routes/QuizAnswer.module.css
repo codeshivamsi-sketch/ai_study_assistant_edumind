@@ -1,0 +1,23 @@
+.answer {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 480px;
+}
+
+.questions {
+  white-space: pre-wrap;
+  font-family: inherit;
+  font-size: 13px;
+}
+
+.form {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.note {
+  font-size: 13px;
+  color: #5c6270;
+}

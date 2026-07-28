@@ -1,0 +1,49 @@
+.detail {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 560px;
+}
+
+.messages {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.role {
+  margin: 0 0 4px 0;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #5c6270;
+}
+
+.user {
+  background: #f4f5f7;
+}
+
+.assistant {
+  background: #ffffff;
+}
+
+.composeForm {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.quizActions {
+  display: flex;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.pending {
+  color: #5c6270;
+  font-size: 13px;
+}
+
+.error {
+  color: #c0392b;
+}

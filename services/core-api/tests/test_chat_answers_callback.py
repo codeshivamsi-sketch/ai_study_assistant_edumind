@@ -12,8 +12,18 @@ def auth(user_id: str) -> dict:
     return {"X-User-Id": user_id}
 
 
-async def create_document(client: AsyncClient, user_id: str, title: str) -> dict:
-    response = await client.post("/documents", json={"title": title, "status": "ready"}, headers=auth(user_id))
+async def _fake_upload_document(document_id, filename, content):
+    pass
+
+
+async def create_document(client: AsyncClient, monkeypatch, user_id: str, title: str) -> dict:
+    monkeypatch.setattr("routes.upload_document", _fake_upload_document)
+    response = await client.post(
+        "/documents",
+        data={"title": title},
+        files={"file": ("doc.pdf", b"%PDF-fake-bytes", "application/pdf")},
+        headers=auth(user_id),
+    )
     assert response.status_code == 200
     return response.json()
 
@@ -59,7 +69,7 @@ async def test_callback_inserts_assistant_message_for_answer_intent(monkeypatch)
     monkeypatch.setattr("routes.celery_app.send_task", fake_send_task)
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        document = await create_document(client, ALICE_ID, "Callback doc")
+        document = await create_document(client, monkeypatch, ALICE_ID, "Callback doc")
         chat = await create_chat(client, ALICE_ID, document["id"])
         user_message = await create_user_message(client, chat["id"], "What is this about?")
 
@@ -88,7 +98,7 @@ async def test_callback_creates_quiz_row_for_quiz_intent(monkeypatch):
     monkeypatch.setattr("routes.celery_app.send_task", lambda *a, **k: None)
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        document = await create_document(client, ALICE_ID, "Quiz-intent doc")
+        document = await create_document(client, monkeypatch, ALICE_ID, "Quiz-intent doc")
         chat = await create_chat(client, ALICE_ID, document["id"])
         user_message = await create_user_message(client, chat["id"], "Quiz me on chapter 1")
 
@@ -159,7 +169,7 @@ async def test_callback_creates_quiz_attempt_for_quiz_answer_intent(monkeypatch)
     monkeypatch.setattr("routes.celery_app.send_task", fake_send_task)
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        document = await create_document(client, ALICE_ID, "Quiz-answer doc")
+        document = await create_document(client, monkeypatch, ALICE_ID, "Quiz-answer doc")
         chat = await create_chat(client, ALICE_ID, document["id"])
 
         quiz_seed_message = await create_user_message(client, chat["id"], "Quiz me")
@@ -217,7 +227,7 @@ async def test_callback_400s_for_quiz_answer_with_unknown_quiz_id(monkeypatch):
     monkeypatch.setattr("routes.celery_app.send_task", lambda *a, **k: None)
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        document = await create_document(client, ALICE_ID, "Bad quiz-answer doc")
+        document = await create_document(client, monkeypatch, ALICE_ID, "Bad quiz-answer doc")
         chat = await create_chat(client, ALICE_ID, document["id"])
         user_message = await create_user_message(client, chat["id"], "A cell is the basic unit of life.")
 

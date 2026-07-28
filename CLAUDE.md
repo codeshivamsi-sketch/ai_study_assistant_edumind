@@ -34,13 +34,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Ownership checks on `documents`, `quizzes`, and `quiz_attempts` always return **404**, never 403, when a resource exists but isn't the caller's — a resource the caller doesn't own must be indistinguishable from one that doesn't exist
 - `quizzes` are reachable only through the `documents` they belong to (`quizzes.document_id → documents.user_id`), and `quiz_attempts` only through the `quizzes` they belong to — every quiz/quiz_attempt endpoint must join back to `documents.user_id` to authorize, not just check the immediate FK
 - `quiz_attempts.quiz_id` and `quiz_attempts.user_id` are `ON DELETE RESTRICT`, not `CASCADE` — score history must survive a quiz or user deletion attempt (the delete fails at the DB level instead)
+- A `document` can only be created together with its file — `POST /documents` is one atomic multipart call (title + file), never a title-only row waiting for a separate upload
+- A `document` has at most one `chat` — `chats.document_id` has a unique index, and `POST /chats` is idempotent per `document_id` (returns the existing chat instead of erroring), so callers never need their own "does one already exist" check
 
 ## Tool routing
 - Before creating any new function or utility: query codegraph — does it already exist?
 - Any non-trivial feature: plan first (Superpowers)
 
 ## Decisions
-- Document upload (`POST /documents/{id}/upload`) stays synchronous — it calls the agentic service inline and waits, no Celery/async job. Considered and explicitly deferred; revisit only if upload latency becomes a real problem.
+- Document upload stays synchronous — `POST /documents` calls the agentic service inline and waits, no Celery/async job. Considered and explicitly deferred; revisit only if upload latency becomes a real problem.
+- Document create and upload were merged into one atomic multipart `POST /documents` (2026-07-28) — the old two-call `POST /documents` (JSON) + `POST /documents/{id}/upload` flow allowed a title-only document with no file, which made no sense product-wise.
 - `agentic` was consolidated into this monorepo from a standalone RAG-assistant repo as `services/agentic`, with its own Dockerfile — it listens on host port 8002 because container port 8000 collides with `core-api`'s own 8000.
 - Neo4j was added as a new `docker-compose.yml` service because `agentic` has a hard, non-optional dependency on it; `chroma_db/`, the LangGraph SQLite checkpoint, and `uploads/` all get named volumes so on-disk state survives `docker-compose up --build`.
 

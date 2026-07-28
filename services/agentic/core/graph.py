@@ -18,12 +18,20 @@ def extract_entities(chunk: str):
         messages=[{"role": "user", "content": chunk}]
     )
     raw = response.content[0].text.strip()
+    fallback = json.dumps({"entities": [], "relationships": []})
 
     json_match = re.search(r'\{.*\}', raw, re.DOTALL)
     if not json_match:
         print("Claude returned unexpected:", raw)
-        return json.dumps({"entities": [], "relationships": []})
-    return json_match.group()
+        return fallback
+
+    candidate = json_match.group()
+    try:
+        json.loads(candidate)
+    except json.JSONDecodeError:
+        print("Claude returned malformed JSON:", candidate)
+        return fallback
+    return candidate
 
 def store_entities(entities_json: str):
     data = json.loads(entities_json)

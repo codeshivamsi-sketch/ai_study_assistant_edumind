@@ -29,8 +29,18 @@ def auth(user_id: str) -> dict:
     return {"X-User-Id": user_id}
 
 
-async def create_document(client: AsyncClient, user_id: str, title: str) -> dict:
-    response = await client.post("/documents", json={"title": title, "status": "uploaded"}, headers=auth(user_id))
+async def _fake_upload_document(document_id, filename, content):
+    pass
+
+
+async def create_document(client: AsyncClient, monkeypatch, user_id: str, title: str) -> dict:
+    monkeypatch.setattr("routes.upload_document", _fake_upload_document)
+    response = await client.post(
+        "/documents",
+        data={"title": title},
+        files={"file": ("doc.pdf", b"%PDF-fake-bytes", "application/pdf")},
+        headers=auth(user_id),
+    )
     assert response.status_code == 200
     return response.json()
 
@@ -49,20 +59,20 @@ async def create_quiz(client: AsyncClient, user_id: str, document_id: str, topic
 
 
 @pytest.mark.asyncio
-async def test_document_crud_happy_path():
+async def test_document_crud_happy_path(monkeypatch):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        document = await create_document(client, ALICE_ID, "Chapter 1 notes")
-        assert document["status"] == "uploaded"
+        document = await create_document(client, monkeypatch, ALICE_ID, "Chapter 1 notes")
+        assert document["status"] == "ready"
 
         get_response = await client.get(f"/documents/{document['id']}", headers=auth(ALICE_ID))
         assert get_response.status_code == 200
         assert get_response.json()["title"] == "Chapter 1 notes"
 
         patch_response = await client.patch(
-            f"/documents/{document['id']}", json={"status": "ready"}, headers=auth(ALICE_ID)
+            f"/documents/{document['id']}", json={"title": "Chapter 1 notes (revised)"}, headers=auth(ALICE_ID)
         )
         assert patch_response.status_code == 200
-        assert patch_response.json()["status"] == "ready"
+        assert patch_response.json()["title"] == "Chapter 1 notes (revised)"
 
         delete_response = await client.delete(f"/documents/{document['id']}", headers=auth(ALICE_ID))
         assert delete_response.status_code == 200
@@ -72,9 +82,9 @@ async def test_document_crud_happy_path():
 
 
 @pytest.mark.asyncio
-async def test_quiz_crud_happy_path():
+async def test_quiz_crud_happy_path(monkeypatch):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        document = await create_document(client, ALICE_ID, "Chapter 2 notes")
+        document = await create_document(client, monkeypatch, ALICE_ID, "Chapter 2 notes")
         quiz = await create_quiz(client, ALICE_ID, document["id"], "Chapter 2 quiz")
 
         get_response = await client.get(f"/quizzes/{quiz['id']}", headers=auth(ALICE_ID))
@@ -92,9 +102,9 @@ async def test_quiz_crud_happy_path():
 
 
 @pytest.mark.asyncio
-async def test_quiz_attempt_and_stats_happy_path():
+async def test_quiz_attempt_and_stats_happy_path(monkeypatch):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        document = await create_document(client, ALICE_ID, "Stats notes")
+        document = await create_document(client, monkeypatch, ALICE_ID, "Stats notes")
         quiz = await create_quiz(client, ALICE_ID, document["id"], "Stats quiz")
 
         attempt1 = await client.post(
@@ -120,9 +130,9 @@ async def test_quiz_attempt_and_stats_happy_path():
 
 
 @pytest.mark.asyncio
-async def test_quiz_attempt_on_other_users_quiz_returns_404():
+async def test_quiz_attempt_on_other_users_quiz_returns_404(monkeypatch):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        document = await create_document(client, ALICE_ID, "Private quiz notes")
+        document = await create_document(client, monkeypatch, ALICE_ID, "Private quiz notes")
         quiz = await create_quiz(client, ALICE_ID, document["id"], "Private quiz")
 
         response = await client.post(
@@ -134,9 +144,9 @@ async def test_quiz_attempt_on_other_users_quiz_returns_404():
 
 
 @pytest.mark.asyncio
-async def test_quiz_stats_other_user_returns_404():
+async def test_quiz_stats_other_user_returns_404(monkeypatch):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        document = await create_document(client, ALICE_ID, "Stats privacy notes")
+        document = await create_document(client, monkeypatch, ALICE_ID, "Stats privacy notes")
         quiz = await create_quiz(client, ALICE_ID, document["id"], "Stats privacy quiz")
 
         response = await client.get(f"/quizzes/{quiz['id']}/stats", headers=auth(BOB_ID))
@@ -172,9 +182,9 @@ async def test_nonexistent_quiz_returns_404():
 
 
 @pytest.mark.asyncio
-async def test_cross_user_access_denied_matrix():
+async def test_cross_user_access_denied_matrix(monkeypatch):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        document = await create_document(client, ALICE_ID, "Matrix notes")
+        document = await create_document(client, monkeypatch, ALICE_ID, "Matrix notes")
         quiz = await create_quiz(client, ALICE_ID, document["id"], "Matrix quiz")
 
         assert (await client.get(f"/documents/{document['id']}", headers=auth(BOB_ID))).status_code == 404

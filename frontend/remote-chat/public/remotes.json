@@ -1,0 +1,5 @@
+{
+  "designSystem": { "url": "http://localhost:3102", "version": "1.0.0" },
+  "chat": { "url": "http://localhost:3104", "version": "1.0.0" },
+  "notifications": { "url": "http://localhost:3105", "version": "1.0.0" }
+}

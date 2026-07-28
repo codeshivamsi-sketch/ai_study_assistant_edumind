@@ -11,10 +11,43 @@ def auth(user_id: str) -> dict:
     return {"X-User-Id": user_id}
 
 
-async def create_document(client: AsyncClient, user_id: str, title: str, status: str = "ready") -> dict:
-    response = await client.post("/documents", json={"title": title, "status": status}, headers=auth(user_id))
+async def _fake_upload_document(document_id, filename, content):
+    pass
+
+
+async def _failing_upload_document(document_id, filename, content):
+    raise RuntimeError("agentic unreachable")
+
+
+async def create_document(client: AsyncClient, monkeypatch, user_id: str, title: str) -> dict:
+    """Creates a document via the atomic upload endpoint with a mocked successful
+    ingestion — always lands as status="ready"."""
+    monkeypatch.setattr("routes.upload_document", _fake_upload_document)
+    response = await client.post(
+        "/documents",
+        data={"title": title},
+        files={"file": ("doc.pdf", b"%PDF-fake-bytes", "application/pdf")},
+        headers=auth(user_id),
+    )
     assert response.status_code == 200
     return response.json()
+
+
+async def create_not_ready_document(client: AsyncClient, monkeypatch, user_id: str, title: str) -> dict:
+    """Creates a document whose ingestion fails, landing at status="failed" —
+    the only reachable non-"ready" terminal state now that creation is atomic."""
+    monkeypatch.setattr("routes.upload_document", _failing_upload_document)
+    response = await client.post(
+        "/documents",
+        data={"title": title},
+        files={"file": ("doc.pdf", b"%PDF-fake-bytes", "application/pdf")},
+        headers=auth(user_id),
+    )
+    assert response.status_code == 502
+    list_response = await client.get("/documents", headers=auth(user_id))
+    matches = [d for d in list_response.json() if d["title"] == title]
+    assert len(matches) == 1
+    return matches[0]
 
 
 async def create_chat(client: AsyncClient, user_id: str, document_id: str, title: str = "Chat") -> dict:
@@ -26,18 +59,33 @@ async def create_chat(client: AsyncClient, user_id: str, document_id: str, title
 
 
 @pytest.mark.asyncio
-async def test_create_chat_happy_path():
+async def test_create_chat_happy_path(monkeypatch):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        document = await create_document(client, ALICE_ID, "Chat notes")
+        document = await create_document(client, monkeypatch, ALICE_ID, "Chat notes")
         chat = await create_chat(client, ALICE_ID, document["id"], "My chat")
         assert chat["title"] == "My chat"
         assert chat["document_id"] == document["id"]
 
 
 @pytest.mark.asyncio
-async def test_create_chat_409s_when_document_not_ready():
+async def test_create_chat_is_idempotent_per_document(monkeypatch):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        document = await create_document(client, ALICE_ID, "Not ready doc", status="uploaded")
+        document = await create_document(client, monkeypatch, ALICE_ID, "Idempotent doc")
+        first = await create_chat(client, ALICE_ID, document["id"], "First title")
+        second = await create_chat(client, ALICE_ID, document["id"], "Second title")
+
+        assert first["id"] == second["id"]
+        assert second["title"] == "First title"  # existing chat returned as-is, title arg ignored
+
+        list_response = await client.get("/chats", headers=auth(ALICE_ID))
+        matching = [c for c in list_response.json() if c["document_id"] == document["id"]]
+        assert len(matching) == 1
+
+
+@pytest.mark.asyncio
+async def test_create_chat_409s_when_document_not_ready(monkeypatch):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        document = await create_not_ready_document(client, monkeypatch, ALICE_ID, "Not ready doc")
         response = await client.post(
             "/chats", json={"document_id": document["id"], "title": "Chat"}, headers=auth(ALICE_ID)
         )
@@ -45,9 +93,9 @@ async def test_create_chat_409s_when_document_not_ready():
 
 
 @pytest.mark.asyncio
-async def test_create_chat_404s_on_other_users_document():
+async def test_create_chat_404s_on_other_users_document(monkeypatch):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        document = await create_document(client, ALICE_ID, "Alice's doc")
+        document = await create_document(client, monkeypatch, ALICE_ID, "Alice's doc")
         response = await client.post(
             "/chats", json={"document_id": document["id"], "title": "Bob's chat"}, headers=auth(BOB_ID)
         )
@@ -55,20 +103,22 @@ async def test_create_chat_404s_on_other_users_document():
 
 
 @pytest.mark.asyncio
-async def test_get_chat_404s_for_other_user():
+async def test_get_chat_404s_for_other_user(monkeypatch):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        document = await create_document(client, ALICE_ID, "Private doc")
+        document = await create_document(client, monkeypatch, ALICE_ID, "Private doc")
         chat = await create_chat(client, ALICE_ID, document["id"])
         assert (await client.get(f"/chats/{chat['id']}", headers=auth(BOB_ID))).status_code == 404
         assert (await client.get(f"/chats/{chat['id']}", headers=auth(ALICE_ID))).status_code == 200
 
 
 @pytest.mark.asyncio
-async def test_list_chats_newest_first():
+async def test_list_chats_newest_first(monkeypatch):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        document = await create_document(client, ALICE_ID, "List doc")
-        first = await create_chat(client, ALICE_ID, document["id"], "First")
-        second = await create_chat(client, ALICE_ID, document["id"], "Second")
+        # One chat per document now — use two documents to test ordering.
+        first_document = await create_document(client, monkeypatch, ALICE_ID, "First doc")
+        first = await create_chat(client, ALICE_ID, first_document["id"], "First")
+        second_document = await create_document(client, monkeypatch, ALICE_ID, "Second doc")
+        second = await create_chat(client, ALICE_ID, second_document["id"], "Second")
 
         response = await client.get("/chats", headers=auth(ALICE_ID))
         assert response.status_code == 200
@@ -76,7 +126,7 @@ async def test_list_chats_newest_first():
         assert ids.index(second["id"]) < ids.index(first["id"])
 
         # Verify cross-user isolation: Bob's chat should not appear in Alice's list
-        bob_document = await create_document(client, BOB_ID, "Bob's doc")
+        bob_document = await create_document(client, monkeypatch, BOB_ID, "Bob's doc")
         bob_chat = await create_chat(client, BOB_ID, bob_document["id"], "Bob's chat")
 
         response = await client.get("/chats", headers=auth(ALICE_ID))
@@ -95,11 +145,11 @@ async def test_create_message_202s_and_dispatches_to_agentic(monkeypatch):
         dispatched["document_id"] = document_id
         dispatched["question"] = question
 
-    monkeypatch.setattr("routes.request_answer", fake_request_answer)
-
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        document = await create_document(client, ALICE_ID, "Async messages doc")
+        document = await create_document(client, monkeypatch, ALICE_ID, "Async messages doc")
         chat = await create_chat(client, ALICE_ID, document["id"])
+
+        monkeypatch.setattr("routes.request_answer", fake_request_answer)
 
         response = await client.post(
             f"/chats/{chat['id']}/messages",
@@ -126,11 +176,11 @@ async def test_create_message_502s_on_agentic_dispatch_failure_keeps_user_row(mo
     async def failing_request_answer(chat_id, message_id, document_id, question):
         raise RuntimeError("agentic unreachable")
 
-    monkeypatch.setattr("routes.request_answer", failing_request_answer)
-
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        document = await create_document(client, ALICE_ID, "Failure doc")
+        document = await create_document(client, monkeypatch, ALICE_ID, "Failure doc")
         chat = await create_chat(client, ALICE_ID, document["id"])
+
+        monkeypatch.setattr("routes.request_answer", failing_request_answer)
 
         response = await client.post(
             f"/chats/{chat['id']}/messages",
@@ -149,11 +199,11 @@ async def test_cross_user_chat_access_denied_matrix(monkeypatch):
     async def fake_request_answer(chat_id, message_id, document_id, question):
         return None
 
-    monkeypatch.setattr("routes.request_answer", fake_request_answer)
-
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        document = await create_document(client, ALICE_ID, "Private chat doc")
+        document = await create_document(client, monkeypatch, ALICE_ID, "Private chat doc")
         chat = await create_chat(client, ALICE_ID, document["id"])
+
+        monkeypatch.setattr("routes.request_answer", fake_request_answer)
 
         assert (await client.get(f"/chats/{chat['id']}/messages", headers=auth(BOB_ID))).status_code == 404
         assert (
@@ -164,9 +214,9 @@ async def test_cross_user_chat_access_denied_matrix(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_create_message_400s_when_quiz_answer_missing_quiz_id():
+async def test_create_message_400s_when_quiz_answer_missing_quiz_id(monkeypatch):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        document = await create_document(client, ALICE_ID, "Quiz answer doc")
+        document = await create_document(client, monkeypatch, ALICE_ID, "Quiz answer doc")
         chat = await create_chat(client, ALICE_ID, document["id"])
 
         response = await client.post(
@@ -178,14 +228,14 @@ async def test_create_message_400s_when_quiz_answer_missing_quiz_id():
 
 
 @pytest.mark.asyncio
-async def test_create_message_404s_when_quiz_id_not_owned():
+async def test_create_message_404s_when_quiz_id_not_owned(monkeypatch):
     from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
     from sqlalchemy.orm import sessionmaker
     from database import DATABASE_URL
     from models import Quiz
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        bob_document = await create_document(client, BOB_ID, "Bob's doc")
+        bob_document = await create_document(client, monkeypatch, BOB_ID, "Bob's doc")
 
         engine = create_async_engine(DATABASE_URL)
         SessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
@@ -197,7 +247,7 @@ async def test_create_message_404s_when_quiz_id_not_owned():
             bob_quiz_id = str(quiz.id)
         await engine.dispose()
 
-        alice_document = await create_document(client, ALICE_ID, "Alice's doc")
+        alice_document = await create_document(client, monkeypatch, ALICE_ID, "Alice's doc")
         alice_chat = await create_chat(client, ALICE_ID, alice_document["id"])
 
         response = await client.post(
@@ -209,14 +259,14 @@ async def test_create_message_404s_when_quiz_id_not_owned():
 
 
 @pytest.mark.asyncio
-async def test_create_message_409s_when_quiz_has_no_thread_id():
+async def test_create_message_409s_when_quiz_has_no_thread_id(monkeypatch):
     from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
     from sqlalchemy.orm import sessionmaker
     from database import DATABASE_URL
     from models import Quiz
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        document = await create_document(client, ALICE_ID, "Pre-migration doc")
+        document = await create_document(client, monkeypatch, ALICE_ID, "Pre-migration doc")
         chat = await create_chat(client, ALICE_ID, document["id"])
 
         engine = create_async_engine(DATABASE_URL)
@@ -253,10 +303,8 @@ async def test_create_message_dispatches_evaluation_for_quiz_answer_intent(monke
         dispatched["message_id"] = message_id
         dispatched["quiz_id"] = quiz_id
 
-    monkeypatch.setattr("routes.request_evaluation", fake_request_evaluation)
-
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        document = await create_document(client, ALICE_ID, "Quiz answer dispatch doc")
+        document = await create_document(client, monkeypatch, ALICE_ID, "Quiz answer dispatch doc")
         chat = await create_chat(client, ALICE_ID, document["id"])
 
         engine = create_async_engine(DATABASE_URL)
@@ -268,6 +316,8 @@ async def test_create_message_dispatches_evaluation_for_quiz_answer_intent(monke
             await session.refresh(quiz)
             quiz_id = str(quiz.id)
         await engine.dispose()
+
+        monkeypatch.setattr("routes.request_evaluation", fake_request_evaluation)
 
         response = await client.post(
             f"/chats/{chat['id']}/messages",

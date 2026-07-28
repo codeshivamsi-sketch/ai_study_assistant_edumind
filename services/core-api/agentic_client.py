@@ -5,7 +5,12 @@ AGENTIC_SERVICE_URL = os.getenv("AGENTIC_SERVICE_URL", "http://localhost:8002")
 
 
 async def upload_document(document_id: str, filename: str, content: bytes) -> None:
-    async with httpx.AsyncClient(timeout=120) as client:
+    # ponytail: flat timeout, not per-chunk-count budgeted. Ingestion calls
+    # Claude once per chunk, sequentially — latency is dominated by that,
+    # not file size. Raise further (or move ingestion off the request path
+    # to the already-wired Celery worker, per CLAUDE.md's Decision) if this
+    # still isn't enough headroom.
+    async with httpx.AsyncClient(timeout=300) as client:
         response = await client.post(
             f"{AGENTIC_SERVICE_URL}/upload",
             files={"file": (filename, content, "application/pdf")},

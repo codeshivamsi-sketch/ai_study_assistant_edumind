@@ -1,12 +1,21 @@
 import Fastify from "fastify";
+import cors from "@fastify/cors";
 import { ZodError } from "zod";
 import { registerRoutes } from "./routes";
 import { startNotifyQuizReadyWorker } from "./jobs/notifyQuizReady";
 import { startGrpcServer } from "./grpc/server";
 import { logger } from "./logger";
 
+const FRONTEND_ORIGINS = [
+  "http://localhost:3001",
+  "http://localhost:3005",
+  "http://localhost:3105",
+];
+
 export function buildApp() {
   const app = Fastify({ logger: true });
+
+  app.register(cors, { origin: FRONTEND_ORIGINS });
 
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof ZodError) {

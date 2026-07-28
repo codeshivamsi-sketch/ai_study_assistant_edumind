@@ -145,6 +145,43 @@ services:
     depends_on:
       - prometheus
 
+  design-system:
+    build:
+      context: .
+      dockerfile: frontend/design-system/Dockerfile
+    ports:
+      - "3002:80"
+
+  remote-chat:
+    build:
+      context: .
+      dockerfile: frontend/remote-chat/Dockerfile
+    ports:
+      - "3004:80"
+
+  remote-notifications:
+    build:
+      context: .
+      dockerfile: frontend/remote-notifications/Dockerfile
+    ports:
+      - "3005:80"
+
+  shell:
+    build:
+      context: .
+      dockerfile: frontend/shell/Dockerfile
+    ports:
+      - "3001:80"
+    volumes:
+      # The bind mount, not the image, is what serves remotes.json — editing
+      # this file pins/rolls back a single remote's URL or version with no
+      # rebuild or restart of the shell container at all.
+      - ./frontend/manifest/remotes.json:/usr/share/nginx/html/remotes.json:ro
+    depends_on:
+      - design-system
+      - remote-chat
+      - remote-notifications
+
 volumes:
   neo4j_data:
   agentic_chroma:
