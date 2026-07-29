@@ -1,4 +1,4 @@
-# AI Study Assistant
+# Edumind - AI Study Assistant
 
 Upload a PDF, chat with it — Q&A, summaries, quiz generation & auto-grading — powered by multi-agent RAG (LangGraph, MCP, evals) with a knowledge graph, an event-driven distributed backend for async LLM workloads, and a micro-frontend UI (Webpack Module Federation).
 
@@ -71,8 +71,6 @@ flowchart TD
     RN -.poll.-> NotifSvc[["notifications"]]
 ```
 
-Remotes resolve at runtime from `remotes.json` — pin/roll back a remote with no rebuild.
-
 ### Core API
 
 ```mermaid
@@ -132,9 +130,6 @@ flowchart TD
     Graph --> SQLite
     Jobs -->|callback| Caller
 ```
-
-![Neo4j concept graph](services/agentic/docs/neo4j.png)
-
 **Agent Graph — LangGraph state machine** (`agents/agents.py`):
 
 ```mermaid
@@ -322,9 +317,11 @@ cd services/notifications && npx prisma migrate deploy    # notifications table
 | Prometheus | http://localhost:9090 |
 | Grafana | http://localhost:3000 |
 
-`core-api` exposes `/metrics`, scraped every 15s. Every LangGraph node run is traced in LangSmith.
+`core-api` exposes `/metrics`, scraped every 15s.
 
 ![Grafana Dashboard](docs/grafana_dashboard.png)
+
+Every LangGraph node run is traced in LangSmith.
 ![LangSmith trace](services/agentic/docs/langsmith.png)
 
 ## Testing
@@ -344,7 +341,6 @@ cd services/notifications && npm test
 | Context Recall | 1.00 |
 
 ![RAGAs evaluation scores](services/agentic/docs/ragas.png)
-![LangSmith trace](services/agentic/docs/langsmith.png)
 
 ## MCP
 
@@ -354,6 +350,13 @@ cd services/notifications && npm test
 | `get_related_concepts(topic)` | related concepts from the graph |
 | `generate_quiz(topic, num_questions)` | quiz from curriculum |
 
-`docker compose up` starts `mcp-server` on `:8003` (streamable-http) — point any MCP client at it.
+`docker compose up` starts `mcp-server` on `:8003` (streamable-http), add below to `claude_desktop_config.json` in Claude desktop, then restart:
+```json
+{
+  "mcpServers": {
+    "edumind": { "url": "http://localhost:8003/mcp" }
+  }
+}
+```
 
 ![Claude MCP tool call](services/agentic/docs/mcp.png)
