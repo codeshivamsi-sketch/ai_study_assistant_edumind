@@ -1,11 +1,12 @@
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 import os
+import uuid
 from typing import Optional
 from core.ingest import save_pdf_on_disk, get_pdf_content, split_content_into_chunks, embed_chunks, store_in_chroma, ingest_graph
-from core.query import embed_ques, get_searched_chunks_from_chroma, get_ans_from_claud, get_related_from_graph
 import chromadb
 from core.model import QueryRequest, AgentRequest, EvaluateRequest
 from core.queue_client import job_queue
+from agents.agents import agent as langgraph_agent
 
 app = FastAPI()
 
@@ -37,6 +38,17 @@ def agent_endpoint(request: AgentRequest):
         request.message_id,
     )
     return {"accepted": True}
+
+
+@app.post("/agent/sync")
+def agent_sync_endpoint(request: QueryRequest):
+    thread_id = str(uuid.uuid4())
+    config = {"configurable": {"thread_id": thread_id}}
+    result = langgraph_agent.invoke(
+        {"question": request.question, "document_id": request.document_id},
+        config=config,
+    )
+    return {**result, "thread_id": thread_id}
 
 
 @app.post("/evaluate", status_code=202)

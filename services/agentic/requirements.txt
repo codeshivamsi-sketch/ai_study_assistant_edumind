@@ -20,3 +20,4 @@ rq
 redis
 httpx
 pytest
+mcp

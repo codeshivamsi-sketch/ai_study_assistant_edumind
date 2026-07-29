@@ -274,42 +274,53 @@ GET /health
 ![RAGAs](docs/ragas.png)
 
 ### Phase 5 — MCP Server
-- Exposed EduMind as an MCP server using the Anthropic MCP Python SDK
-- Claude Desktop connects to the server and calls EduMind tools directly
-- 3 tools registered:
+- Exposed EduMind as an MCP server using the Anthropic MCP Python SDK (`FastMCP`)
+- 3 tools registered, all proxying through the single `/agent/sync` endpoint
+  on the `agentic` API — the same LangGraph agent used by chat, which
+  classifies intent (answer / quiz / summarize) and always runs retrieval
+  first, so every tool call gets grounded context and related concepts:
 
 | Tool | Description |
 |------|-------------|
-| `query_curriculum(question)` | RAG query over uploaded content — returns grounded answer with sources |
-| `get_related_concepts(topic)` | Neo4j graph traversal — returns related concepts for a topic |
-| `generate_quiz(topic, num_questions)` | Triggers Quiz Agent — returns quiz questions from curriculum |
+| `query_curriculum(question)` | Asks the agent a question — returns a grounded answer |
+| `get_related_concepts(topic)` | Asks the agent about a topic — returns the related concepts retrieval always gathers, regardless of intent |
+| `generate_quiz(topic, num_questions)` | Asks the agent to quiz on a topic — returns quiz questions from curriculum |
 
-- MCP server runs as a subprocess launched by Claude Desktop via stdio transport
-- No extra HTTP server needed — communicates through stdin/stdout
-- Claude Desktop automatically discovers and calls tools based on user intent
+- Runs as its own `mcp-server` service in `docker-compose.yml`, using the
+  `streamable-http` transport — comes up automatically with `docker compose
+  up` / `make up`, no separate process to launch by hand
+- Can still run as a local stdio subprocess instead (e.g. for a Claude
+  Desktop config that spawns it directly) by setting `MCP_TRANSPORT=stdio`,
+  which is also the default when the env var isn't set
 
 **Demo:** Open Claude Desktop → ask "quiz me on machine learning using my curriculum" → Claude calls `generate_quiz` → returns questions grounded in your uploaded PDF.
 
 #### Connect to Claude Desktop
 
-Add to `~/Library/Application Support/Claude/claude_desktop_config.json`
-(paths below are inside your local clone of the monorepo):
+**Docker (default):** with `docker compose up` running, point your MCP
+client at `http://localhost:8003` (streamable-http). Check your client's
+docs for the exact config shape it expects for a remote/HTTP MCP server —
+this varies by client and client version.
+
+**Local stdio (alternative):** add to `~/Library/Application
+Support/Claude/claude_desktop_config.json` (path below is inside your local
+clone of the monorepo):
 
 ```json
 {
   "mcpServers": {
     "edumind": {
       "command": "/path/to/python_backend_refresher/services/agentic/venv/bin/python",
-      "args": ["/path/to/python_backend_refresher/services/agentic/mcp/server.py"]
+      "args": ["/path/to/python_backend_refresher/services/agentic/mcp/server.py"],
+      "env": { "MCP_TRANSPORT": "stdio" }
     }
   }
 }
 ```
 
-The MCP server runs as a local stdio subprocess (not inside Docker) and
-talks to the API at `http://localhost:8002` by default — override with the
-`EDUMIND_BASE_URL` env var if you've remapped the host port. Restart Claude
-Desktop after editing the config. Make sure `docker-compose up neo4j
-agentic` is running first.
+In stdio mode the server talks to the API at `http://localhost:8002` by
+default — override with the `EDUMIND_BASE_URL` env var if you've remapped
+the host port. Restart Claude Desktop after editing the config. Make sure
+`docker-compose up neo4j agentic` is running first.
 
 ![MCP](docs/mcp.png)

@@ -129,6 +129,18 @@ services:
       - agentic_uploads:/app/uploads
     command: rq worker --url redis://redis:6379/2 agent_jobs
 
+  mcp-server:
+    build: ./services/agentic
+    ports:
+      - "8003:8000"
+    environment:
+      EDUMIND_BASE_URL: http://agentic:8000
+      MCP_TRANSPORT: streamable-http
+      MCP_PORT: "8000"
+    depends_on:
+      - agentic
+    command: python mcp/server.py
+
   prometheus:
     image: prom/prometheus:latest
     volumes:
