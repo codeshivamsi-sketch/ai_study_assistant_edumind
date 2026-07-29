@@ -40,16 +40,18 @@ flowchart TD
     Notif[["Notifications\nFastify + gRPC · :5000/5001"]]
     Agentic[["Agentic\nFastAPI + LangGraph · :8002"]]
     PG[("Postgres\nedumind")]
-    Redis[("Redis")]
+    Redis[("Redis\ndb0 Celery · db1 BullMQ · db2 RQ")]
     Claude(["Anthropic Claude"])
 
     FE -->|X-User-Id| Core
-    FE -.poll.-> Notif
+    FE -->|X-User-Id, poll| Notif
     Core --> PG
     Core <-->|upload sync · agent/evaluate async| Agentic
-    Core -->|Celery → gRPC| Notif
+    Core <-->|Celery broker| Redis
+    Core -->|gRPC| Notif
+    Notif <-->|BullMQ| Redis
     Notif --> PG
-    Agentic --> Redis
+    Agentic <-->|RQ| Redis
     Agentic --> Claude
 ```
 
