@@ -19,4 +19,4 @@ COPY --from=build /app/proto ./proto
 COPY --from=build /app/prisma ./prisma
 COPY --from=build /app/package.json ./package.json
 
-CMD ["sh", "-c", "npx prisma migrate deploy && node dist/src/main.js"]
+CMD ["sh", "-c", "npx prisma migrate resolve --applied 00000000000000_baseline || true && npx prisma migrate deploy && node dist/src/main.js"]
