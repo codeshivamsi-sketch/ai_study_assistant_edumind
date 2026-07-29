@@ -68,20 +68,23 @@ flowchart TD
     Shell -->|Module Federation| DS["design-system :3002"]
     Shell -->|Module Federation| Chat["remote-chat :3004"]
     Shell -->|Module Federation| RN["remote-notifications :3005"]
-    Chat --> CoreAPI[["core-api"]]
-    RN --> CoreAPI
-    RN -.poll.-> NotifSvc[["notifications"]]
+    Chat -->|X-User-Id| CoreAPI[["core-api"]]
+    RN -->|"X-User-Id, polls every few seconds\n(never calls core-api)"| NotifSvc[["notifications"]]
 ```
 
 ### Core API
 
 ```mermaid
 flowchart TD
-    Client -->|X-User-Id| Routes["routes.py"]
-    Routes --> Identity["identity.py\n404, never 403"]
+    Client -->|X-User-Id| Identity["identity.py\n401 if header missing/unknown"]
+    Identity --> Routes["routes.py\n404, never 403, on any not-owned resource"]
     Routes --> DB[("Postgres")]
-    Routes -->|sync upload ·\nasync agent/evaluate| AC["agentic_client.py"] --> Agentic[["agentic"]]
-    Routes -->|send_task| CW["worker.py\nCelery: notify_quiz_ready"]
+    Routes -->|"upload_document()\nsync, blocks up to 300s"| AC["agentic_client.py"]
+    Routes -->|"request_answer() / request_evaluation()\nfire-and-forget POST, 202 in ~10s"| AC
+    AC --> Agentic[["agentic"]]
+    Agentic -->|"POST /internal/chat-answers\ncallback: assistant reply / quiz ready"| Routes
+    Routes -->|"send_task('notify_quiz_ready')"| Redis[("Redis\nCelery broker, db0")]
+    Redis --> CW["worker service\n(separate container:\ncelery -A worker worker)"]
     CW --> GC["grpc_client.py"] --> NotifSvc[["notifications"]]
     Routes -.->|/metrics| Prom[["Prometheus"]]
 ```
@@ -100,12 +103,14 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    Caller[["core-api / MCP"]]
+    Core[["core-api"]]
+    MCP[["mcp-server"]]
 
     subgraph API ["api/main.py :8002"]
         Upload["POST /upload\nsync"]
         AgentEp["POST /agent\nenqueue, 202"]
         EvalEp["POST /evaluate\nenqueue, 202"]
+        AgentSync["POST /agent/sync\ninvoke inline · MCP only"]
     end
 
     RQ[("Redis: RQ")]
@@ -120,17 +125,18 @@ flowchart TD
     SQLite[("SQLite checkpoints")]
     Claude(["Anthropic Claude"])
 
-    Caller --> Upload --> Chroma
+    Core --> Upload --> Chroma
     Upload --> Neo4j
     Upload --> Claude
-    Caller --> AgentEp --> RQ
-    Caller --> EvalEp --> RQ
+    Core --> AgentEp --> RQ
+    Core --> EvalEp --> RQ
+    MCP -->|"no RQ, no callback"| AgentSync --> Graph
     RQ --> Jobs --> Graph
     Graph --> Chroma
     Graph --> Neo4j
     Graph --> Claude
     Graph --> SQLite
-    Jobs -->|callback| Caller
+    Jobs -->|callback| Core
 ```
 **Agent Graph — LangGraph state machine** (`agents/agents.py`):
 
