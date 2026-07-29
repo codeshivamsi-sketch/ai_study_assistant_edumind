@@ -107,27 +107,21 @@ flowchart TD
     MCP[["mcp-server"]]
 
     subgraph API ["api/main.py :8002"]
-        Upload["POST /upload\nsync"]
+        Upload["POST /upload\nsync, blocks\n(ingestion detail → Upload flow)"]
         AgentEp["POST /agent\nenqueue, 202"]
         EvalEp["POST /evaluate\nenqueue, 202"]
-        AgentSync["POST /agent/sync\ninvoke inline · MCP only"]
+        AgentSync["POST /agent/sync\ninvoke inline"]
     end
 
     RQ[("Redis: RQ")]
-
-    subgraph Worker ["agentic-worker"]
-        Jobs["run_agent_job / run_evaluate_job"]
-    end
-
-    Graph["LangGraph agent\n(see below)"]
+    Jobs["agentic-worker\nrun_agent_job / run_evaluate_job"]
+    Graph["LangGraph agent\n(state machine below)"]
     Chroma[("Chroma")]
     Neo4j[("Neo4j")]
     SQLite[("SQLite checkpoints")]
     Claude(["Anthropic Claude"])
 
-    Core --> Upload --> Chroma
-    Upload --> Neo4j
-    Upload --> Claude
+    Core --> Upload
     Core --> AgentEp --> RQ
     Core --> EvalEp --> RQ
     MCP -->|"no RQ, no callback"| AgentSync --> Graph
