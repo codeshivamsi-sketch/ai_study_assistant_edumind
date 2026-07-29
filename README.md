@@ -1,4 +1,4 @@
-# Edumind - AI Study Assistant
+# AI Study Assistant - Edumind
 
 Upload a PDF, chat with it — Q&A, summaries, quiz generation & auto-grading — powered by multi-agent RAG (LangGraph, MCP, evals) with a knowledge graph, an event-driven distributed backend for async LLM workloads, and a micro-frontend UI (Webpack Module Federation).
 
