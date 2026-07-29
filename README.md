@@ -1,218 +1,359 @@
-# Backend in python — refresher — EduMind
+# AI Study Assistant
 
-A project to refresh hands-on familiarity with backend infrastructure in python (plus a couple of intentional excursions into Node/TypeScript): async APIs, ORM + migrations, background jobs, RAG, multi-service orchestration, and observability, built around a study-assistant domain (EduMind: upload a document, chat with it — ask questions, get a summary, or a quiz — and get quiz answers auto-graded). Each technology is wired in just enough to work; none are used in depth.
+Upload a PDF, chat with it — Q&A, summaries, quiz generation & auto-grading — powered by multi-agent RAG (LangGraph, MCP, evals) with a knowledge graph, an event-driven distributed backend for async LLM workloads, and a micro-frontend UI (Webpack Module Federation).
 
 ![Python](https://img.shields.io/badge/Python-3776AB?style=flat&logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=flat&logo=fastapi&logoColor=white)
+![Pydantic](https://img.shields.io/badge/Pydantic-E92063?style=flat&logo=pydantic&logoColor=white)
+![SQLAlchemy](https://img.shields.io/badge/SQLAlchemy-D71F00?style=flat)
+![Alembic](https://img.shields.io/badge/Alembic-6BA81E?style=flat)
+![pytest](https://img.shields.io/badge/pytest-0A9EDC?style=flat&logo=pytest&logoColor=white)
+![Fastify](https://img.shields.io/badge/Fastify-000000?style=flat&logo=fastify&logoColor=white)
+![Node.js](https://img.shields.io/badge/Node.js-339933?style=flat&logo=nodedotjs&logoColor=white)
+![Zod](https://img.shields.io/badge/Zod-3E67B1?style=flat&logo=zod&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=flat&logo=typescript&logoColor=white)
+![React](https://img.shields.io/badge/React-61DAFB?style=flat&logo=react&logoColor=black)
+![React Router](https://img.shields.io/badge/React_Router-CA4245?style=flat&logo=reactrouter&logoColor=white)
+![Webpack](https://img.shields.io/badge/Webpack-8DD6F9?style=flat&logo=webpack&logoColor=black)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-4169E1?style=flat&logo=postgresql&logoColor=white)
 ![Redis](https://img.shields.io/badge/Redis-DC382D?style=flat&logo=redis&logoColor=white)
 ![Celery](https://img.shields.io/badge/Celery-37814A?style=flat&logo=celery&logoColor=white)
+![BullMQ](https://img.shields.io/badge/BullMQ-DC382D?style=flat)
 ![Neo4j](https://img.shields.io/badge/Neo4j-4581C3?style=flat&logo=neo4j&logoColor=white)
-![Node.js](https://img.shields.io/badge/Node.js-339933?style=flat&logo=nodedotjs&logoColor=white)
-![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=flat&logo=typescript&logoColor=white)
+![ChromaDB](https://img.shields.io/badge/ChromaDB-FF6B35?style=flat)
+![Claude](https://img.shields.io/badge/Claude-D97757?style=flat&logo=anthropic&logoColor=white)
+![LangGraph](https://img.shields.io/badge/LangGraph-1C3C3C?style=flat&logo=langchain&logoColor=white)
+![LangSmith](https://img.shields.io/badge/LangSmith-F5A623?style=flat)
+![RAGAs](https://img.shields.io/badge/RAGAs-6C3483?style=flat)
+![MCP](https://img.shields.io/badge/MCP-000000?style=flat&logo=anthropic&logoColor=white)
 ![Prisma](https://img.shields.io/badge/Prisma-2D3748?style=flat&logo=prisma&logoColor=white)
 ![Prometheus](https://img.shields.io/badge/Prometheus-E6522C?style=flat&logo=prometheus&logoColor=white)
 ![Grafana](https://img.shields.io/badge/Grafana-F46800?style=flat&logo=grafana&logoColor=white)
 ![Docker](https://img.shields.io/badge/Docker-2496ED?style=flat&logo=docker&logoColor=white)
 
-## Architecture Overview
-
-Four services, three Redis-backed queues, two LLM-adjacent stores (Chroma + Neo4j), one shared Postgres. See `docs/architecture.md` for the full component diagram, an ER diagram, and hand-traced sequence diagrams for the upload, chat (ask/quiz/summarize), and quiz-answer-evaluation flows.
+## High-Level Design
 
 ```mermaid
 flowchart TD
-    Client(["Client\nHTTP / curl"])
+    FE[["Frontend\nModule Federation · :3001"]]
+    Core[["Core API\nFastAPI · :8000"]]
+    Notif[["Notifications\nFastify + gRPC · :5000/5001"]]
+    Agentic[["Agentic\nFastAPI + LangGraph · :8002"]]
+    PG[("Postgres\nedumind")]
+    Redis[("Redis")]
+    Claude(["Anthropic Claude"])
 
-    subgraph CoreAPI ["core-api — FastAPI · :8000"]
-        Core["routes.py\nSQLAlchemy · structlog"]
-        CWorker["Celery worker\nnotify_quiz_ready"]
-    end
-
-    subgraph Agentic ["agentic — FastAPI · :8002\nLangGraph + Anthropic Claude"]
-        AApi["api/main.py"]
-        AWorker["agentic-worker — RQ\nchat/quiz-answer jobs"]
-    end
-
-    subgraph Notifications ["notifications — Fastify + gRPC · :5000/:5001"]
-        NGrpc["gRPC server"]
-        NWorker["BullMQ worker\n→ Prisma"]
-    end
-
-    PG[("PostgreSQL: edumind\nAlembic (core-api) + Prisma (notifications)")]
-    Redis[("Redis\ndb0 Celery · db1 BullMQ · db2 RQ")]
-    Chroma[("Chroma\nvector chunks")]
-    Neo4j[("Neo4j\nconcept graph")]
-    Claude(["Anthropic Claude API"])
-
-    Client -->|HTTP, X-User-Id| Core
-    Core -->|SQL| PG
-    Core <-->|upload sync · agent/evaluate async| AApi
-    AApi <-->|enqueue / dequeue| Redis
-    AWorker --> Chroma
-    AWorker --> Neo4j
-    AWorker --> Claude
-    AWorker -->|callback| Core
-    Core -->|send_task| Redis
-    Redis --> CWorker
-    CWorker -->|gRPC| NGrpc
-    NGrpc --> Redis
-    Redis --> NWorker
-    NWorker --> PG
+    FE -->|X-User-Id| Core
+    FE -.poll.-> Notif
+    Core --> PG
+    Core <-->|upload sync · agent/evaluate async| Agentic
+    Core -->|Celery → gRPC| Notif
+    Notif --> PG
+    Agentic --> Redis
+    Agentic --> Claude
 ```
 
-## Tech Stack
-
-- **FastAPI** — REST API framework (`core-api`, `agentic`)
-- **PostgreSQL** — shared primary database (`edumind`), one schema managed by Alembic, one by Prisma
-- **SQLAlchemy + Alembic** — ORM and migrations for `core-api`
-- **Redis** — backs three independent queues on separate logical DBs: Celery (`core-api`), BullMQ (`notifications`), RQ (`agentic`)
-- **Celery** — dispatches quiz/chat-answer-ready notifications from `core-api`
-- **RQ** — `agentic`'s own job queue; runs chat-answer and quiz-evaluation jobs off the request path
-- **LangGraph** — the RAG orchestration graph (intent classification → retrieval → answer/quiz/summarize/evaluate), with SQLite-backed thread checkpointing so a quiz can pause and later resume for grading
-- **Anthropic Claude API** — intent classification, entity extraction, answer/quiz/summary generation, and quiz-answer grading
-- **ChromaDB** — vector store for document chunks, scoped by `document_id`
-- **sentence-transformers** — local embeddings (`all-MiniLM-L6-v2`), no API call needed for retrieval
-- **Neo4j** — a global knowledge graph of concepts/relationships extracted from ingested documents
-- **Node.js + TypeScript + Fastify** — the `notifications` service
-- **Prisma** — ORM/migrations for `notifications`' slice of the shared `edumind` database
-- **BullMQ + gRPC** — `notifications`' own queue, fed by a gRPC call from `core-api`'s Celery worker
-- **structlog** — structured JSON logging (`core-api`)
-- **Prometheus** — metrics scraping
-- **Grafana** — metrics visualisation
-- **Docker** — containerised infrastructure for all of the above
+Everything else — Neo4j, Chroma, Prometheus/Grafana, the MCP server — lives inside `Agentic`/`Core API`; see the per-service diagrams below.
 
 ## Services
 
-- **core-api** (port 8000) — study-assistant domain: users, documents, quizzes, quiz attempts, chats/messages. Owns the shared identity model — a plain `X-User-Id` header, validated against the `users` table, with every ownership check returning 404 rather than 403. Talks to `agentic` over HTTP and to `notifications` over gRPC (via its Celery worker).
-- **worker** — the Celery worker process for `core-api`; currently runs one task, `notify_quiz_ready`.
-- **agentic** (host port 8002) — RAG service: PDF ingestion (Chroma + Neo4j) and a LangGraph agent that answers questions, generates quizzes, summarizes, and grades quiz answers against the Anthropic Claude API. `/upload` is synchronous; `/agent` and `/evaluate` are enqueue-and-ack, processed by `agentic-worker`.
-- **agentic-worker** — `agentic`'s RQ worker; runs the actual LangGraph invocations and calls back into `core-api`'s `/internal/chat-answers` when done.
-- **notifications** (ports 5000/5001) — Fastify HTTP API + gRPC server for delivering "your quiz/answer is ready" notifications, backed by its own BullMQ worker and Prisma-managed `notifications` table.
+### Frontend
+
+```mermaid
+flowchart TD
+    Browser --> Shell["shell :3001\nrouter · SessionContext (X-User-Id)"]
+    Shell --> Manifest[["remotes.json"]]
+    Shell -->|Module Federation| DS["design-system :3002"]
+    Shell -->|Module Federation| Chat["remote-chat :3004"]
+    Shell -->|Module Federation| RN["remote-notifications :3005"]
+    Chat --> CoreAPI[["core-api"]]
+    RN --> CoreAPI
+    RN -.poll.-> NotifSvc[["notifications"]]
+```
+
+Remotes resolve at runtime from `remotes.json` — pin/roll back a remote with no rebuild.
+
+### Core API
+
+```mermaid
+flowchart TD
+    Client -->|X-User-Id| Routes["routes.py"]
+    Routes --> Identity["identity.py\n404, never 403"]
+    Routes --> DB[("Postgres")]
+    Routes -->|sync upload ·\nasync agent/evaluate| AC["agentic_client.py"] --> Agentic[["agentic"]]
+    Routes -->|send_task| CW["worker.py\nCelery: notify_quiz_ready"]
+    CW --> GC["grpc_client.py"] --> NotifSvc[["notifications"]]
+    Routes -.->|/metrics| Prom[["Prometheus"]]
+```
+
+### Notifications
+
+```mermaid
+flowchart TD
+    CoreWorker[["core-api Celery worker"]] -->|gRPC| GrpcServer["grpc/server.ts"]
+    GrpcServer --> BullMQ[("Redis: BullMQ")]
+    BullMQ --> JobWorker["jobs/notifyQuizReady.ts"] --> DB[("Postgres: notifications")]
+    Client -->|X-User-Id| HTTP["routes.ts"] --> DB
+```
+
+### Agentic
+
+```mermaid
+flowchart TD
+    Caller[["core-api / MCP"]]
+
+    subgraph API ["api/main.py :8002"]
+        Upload["POST /upload\nsync"]
+        AgentEp["POST /agent\nenqueue, 202"]
+        EvalEp["POST /evaluate\nenqueue, 202"]
+    end
+
+    RQ[("Redis: RQ")]
+
+    subgraph Worker ["agentic-worker"]
+        Jobs["run_agent_job / run_evaluate_job"]
+    end
+
+    Graph["LangGraph agent\n(see below)"]
+    Chroma[("Chroma")]
+    Neo4j[("Neo4j")]
+    SQLite[("SQLite checkpoints")]
+    Claude(["Anthropic Claude"])
+
+    Caller --> Upload --> Chroma
+    Upload --> Neo4j
+    Upload --> Claude
+    Caller --> AgentEp --> RQ
+    Caller --> EvalEp --> RQ
+    RQ --> Jobs --> Graph
+    Graph --> Chroma
+    Graph --> Neo4j
+    Graph --> Claude
+    Graph --> SQLite
+    Jobs -->|callback| Caller
+```
+
+![Neo4j concept graph](services/agentic/docs/neo4j.png)
+
+**Agent Graph — LangGraph state machine** (`agents/agents.py`):
+
+```mermaid
+flowchart TD
+    Entry(["entry"]) --> O["orchestrator\nclassify intent"]
+    O --> R["retrieval\nChroma + Neo4j"]
+    R -->|answer| A["answer_node"]
+    R -->|quiz| Q["quiz_node"]
+    R -->|summarize| S["summarizer_node"]
+    R -.->|"evaluate (dead — never classified)"| Ev
+    Q ==>|"interrupt_after=['quiz']\nresumes via POST /evaluate"| Ev["evaluator_node"]
+    A --> End(["END"])
+    S --> End
+    Ev --> End
+```
+
+## ER Diagram (Postgres)
+
+```mermaid
+erDiagram
+    USERS ||--o{ DOCUMENTS : owns
+    USERS ||--o{ CHATS : owns
+    USERS ||--o{ QUIZ_ATTEMPTS : attempts
+    DOCUMENTS ||--o| CHATS : "1:1, unique document_id"
+    DOCUMENTS ||--o{ QUIZZES : contains
+    CHATS ||--o{ MESSAGES : contains
+    QUIZZES ||--o{ QUIZ_ATTEMPTS : "RESTRICT, not CASCADE"
+    QUIZZES ||--o{ MESSAGES : "quiz_id, SET NULL"
+    USERS ||--o{ NOTIFICATIONS : "user_id, no FK (Prisma)"
+
+    USERS {
+        uuid id PK
+        string email UK
+        string name
+    }
+    DOCUMENTS {
+        uuid id PK
+        uuid user_id FK
+        string status "uploaded/processing/ready/failed"
+    }
+    CHATS {
+        uuid id PK
+        uuid user_id FK
+        uuid document_id FK "unique"
+    }
+    MESSAGES {
+        uuid id PK
+        uuid chat_id FK
+        string role "user/assistant"
+        uuid quiz_id FK "nullable"
+    }
+    QUIZZES {
+        uuid id PK
+        uuid document_id FK
+        jsonb questions
+        string thread_id "LangGraph"
+    }
+    QUIZ_ATTEMPTS {
+        uuid id PK
+        uuid quiz_id FK
+        uuid user_id FK
+        numeric score
+    }
+    NOTIFICATIONS {
+        uuid id PK
+        uuid user_id "Prisma-managed"
+        boolean read
+    }
+```
+
+One `edumind` database, two migration tools: Alembic owns everything except `notifications`, which Prisma owns — no cross-schema FK between them.
+
+## Flows
+
+### Upload
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant Core as core-api
+    participant PG as Postgres
+    participant Agentic as agentic
+    participant Chroma
+    participant Neo4j
+    participant Claude as Anthropic Claude
+
+    C->>Core: POST /documents (multipart: title + file)
+    Core->>PG: INSERT documents (status=uploaded → processing)
+    Core->>Agentic: POST /upload (file, document_id) — sync, waits
+    Agentic->>Agentic: extract text, chunk, embed
+    Agentic->>Chroma: store chunk embeddings
+    loop per chunk
+        Agentic->>Claude: extract entities/relationships
+        Agentic->>Neo4j: merge concept graph
+    end
+    Agentic-->>Core: 200 {chunks, document_id}
+    Core->>PG: UPDATE documents SET status=ready (or failed)
+    Core-->>C: 200 document
+```
+
+### Message (ask / quiz / summarize)
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant Core as core-api
+    participant PG as Postgres
+    participant Agentic as agentic
+    participant RQ as Redis (RQ)
+    participant Worker as agentic-worker
+    participant Chroma
+    participant Neo4j
+    participant Claude as Anthropic Claude
+    participant CeleryR as Redis (Celery)
+    participant CW as Celery worker
+    participant Notif as notifications (gRPC)
+
+    C->>Core: POST /chats/{id}/messages {content}
+    Core->>PG: INSERT messages (role=user)
+    Core->>Agentic: POST /agent {question, document_id, chat_id, message_id}
+    Agentic->>RQ: enqueue run_agent_job
+    Agentic-->>Core: 202 accepted
+    Core-->>C: 202 {user_message}
+
+    RQ->>Worker: dequeue run_agent_job
+    Worker->>Claude: classify intent (ask / quiz / summarize)
+    Worker->>Chroma: retrieve relevant chunks
+    Worker->>Neo4j: fetch related concepts
+    Worker->>Claude: generate answer / quiz / summary
+    Worker->>Core: POST /internal/chat-answers {result}
+    Core->>PG: INSERT messages (role=assistant) [+ quizzes if intent=quiz]
+    Core->>CeleryR: send_task notify_quiz_ready
+    CeleryR->>CW: dequeue
+    CW->>Notif: gRPC NotifyQuizReady
+```
+
+### Evaluate (quiz answer)
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant Core as core-api
+    participant PG as Postgres
+    participant Agentic as agentic
+    participant RQ as Redis (RQ)
+    participant Worker as agentic-worker
+    participant Claude as Anthropic Claude
+    participant CeleryR as Redis (Celery)
+    participant CW as Celery worker
+    participant Notif as notifications (gRPC)
+
+    C->>Core: POST /chats/{id}/messages {content: answer, intent: quiz_answer, quiz_id}
+    Core->>PG: verify quiz ownership + thread_id, INSERT messages (role=user)
+    Core->>Agentic: POST /evaluate {thread_id, user_answer, quiz_id}
+    Agentic->>RQ: enqueue run_evaluate_job
+    Agentic-->>Core: 202 accepted
+    Core-->>C: 202 {user_message}
+
+    RQ->>Worker: dequeue run_evaluate_job
+    Worker->>Worker: resume paused thread (as_node="quiz")
+    Worker->>Claude: evaluate_node — score + feedback
+    Worker->>Core: POST /internal/chat-answers {score, feedback}
+    Core->>PG: INSERT messages (role=assistant, content=feedback)
+    Core->>PG: INSERT quiz_attempts (score, feedback)
+    Core->>CeleryR: send_task notify_quiz_ready
+    CeleryR->>CW: dequeue
+    CW->>Notif: gRPC NotifyQuizReady
+```
+
+Full hand-traced versions (exact function/table names, error branches, retry behavior) are in `docs/architecture.md`.
 
 ## Running Locally
 
-### Prerequisites
-- Docker + Docker Compose
-- make
-- An Anthropic API key in `services/agentic/.env` (`ANTHROPIC_API_KEY=...`) — required by `docker-compose.yml`'s `env_file:` for the `agentic`/`agentic-worker` services; nothing starts meaningfully in the RAG/chat path without it
-
-### Start everything
-
 ```bash
-make up
+cp services/agentic/.env.example services/agentic/.env   # add ANTHROPIC_API_KEY
+make up                                                  # docker-compose up --build, every service
+cd services/core-api && alembic upgrade head              # core-api tables
+cd services/notifications && npx prisma migrate deploy    # notifications table
 ```
-
-Brings up `core-api`, `worker` (Celery), `agentic`, `agentic-worker` (RQ), `notifications`, `postgres`, `redis`, `neo4j`, `prometheus`, and `grafana`.
-
-### Run migrations
-
-```bash
-cd services/core-api
-alembic upgrade head
-```
-
-`notifications`' own tables are managed separately via Prisma (`cd services/notifications && npx prisma migrate deploy`) — one `alembic upgrade head` does not cover them, even though both services share the `edumind` database.
-
-### Run tests
-
-```bash
-cd services/core-api
-pytest tests/ -v
-```
-
-Requires a running Postgres (`make up`, at minimum) — tests hit the real `edumind` database, no mocks. `notifications` has its own suite (`cd services/notifications && npm test`).
-
-## API Endpoints
-
-`core-api` is the only service with a client-facing API — `agentic` (`/upload`, `/agent`, `/evaluate`) and `notifications` (`/notifications`, gRPC `NotifyQuizReady`) are internal, called by `core-api` rather than directly by clients.
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/documents` | Create a document — multipart, atomic: `title` + `file` together, ingested synchronously into Chroma + Neo4j via `agentic`, document status becomes `ready`/`failed`. There is no way to create a document without a file. |
-| GET | `/documents` | List the caller's documents |
-| GET | `/documents/{id}` | Get a document (404 if not the caller's) |
-| PATCH | `/documents/{id}` | Update a document (404 if not the caller's) |
-| DELETE | `/documents/{id}` | Delete a document (404 if not the caller's) |
-| GET | `/quizzes` | List quizzes on the caller's documents |
-| GET | `/quizzes/{id}` | Get a quiz (404 if its document isn't the caller's) |
-| PATCH | `/quizzes/{id}` | Update a quiz (404 if its document isn't the caller's) |
-| DELETE | `/quizzes/{id}` | Delete a quiz (404 if its document isn't the caller's) |
-| POST | `/quiz_attempts` | Record an attempt (score is client-supplied) against one of the caller's quizzes |
-| GET | `/quizzes/{id}/stats` | Aggregate stats (`avg_score`, `attempt_count`) for a quiz (404 if not the caller's) |
-| POST | `/chats` | Start a chat against one of the caller's `ready` documents — idempotent per `document_id`: returns the existing chat (200) if one already exists instead of creating another. Each document has at most one chat (`chats.document_id` is unique). |
-| GET | `/chats` | List the caller's chats |
-| GET | `/chats/{id}` | Get a chat (404 if not the caller's) |
-| GET | `/chats/{id}/messages` | List a chat's messages in order |
-| POST | `/chats/{id}/messages` | Ask a question, request a quiz/summary, or (with `intent: "quiz_answer"`) submit a quiz answer for grading — `202`, dispatched to `agentic` asynchronously; the reply shows up via `GET .../messages` once the LangGraph job (and, for quiz answers, LLM grading) finishes |
-| GET | `/health` | Health check |
-
-There is no `POST /quizzes` — quizzes are only created as a side effect of a chat message classified with `intent == "quiz"`; there's likewise no polling/job-status endpoint for an in-flight chat message, by design (see `docs/architecture.md`'s message-flow diagram).
-
-All ownership checks return 404, never 403, so cross-user probing can't distinguish "doesn't exist" from "not yours."
 
 ## Observability
 
-Prometheus and Grafana are included in the Docker setup.
-
-| Service | URL |
-|---------|-----|
+| | URL |
+|---|---|
 | Prometheus | http://localhost:9090 |
 | Grafana | http://localhost:3000 |
 
-`core-api` exposes a `/metrics` endpoint scraped by Prometheus every 15s. Open Grafana at http://localhost:3000, add Prometheus as a datasource (http://prometheus:9090), and query metrics like http_requests_total for request counts and histogram_quantile(0.90, rate(http_request_duration_seconds_bucket[5m])) for p90 latency.
+`core-api` exposes `/metrics`, scraped every 15s. Every LangGraph node run is traced in LangSmith.
 
 ![Grafana Dashboard](docs/grafana_dashboard.png)
+![LangSmith trace](services/agentic/docs/langsmith.png)
 
-## Build Phases
+## Testing
 
-### Phase 1 — FastAPI + PostgreSQL
-- Set up the service with FastAPI and an async PostgreSQL connection via `asyncpg`.
+```bash
+cd services/core-api && pytest tests/ -v        # needs postgres running (make up)
+cd services/notifications && npm test
+```
 
-### Phase 2 — Alembic Migrations
-- Introduced Alembic for schema versioning. Migration scripts handle table creation and column changes, keeping the database schema in sync across environments without manual SQL.
+**RAGAs eval** (`services/agentic/eval`, 30-question golden dataset, Claude as judge):
 
-### Phase 3 — Idempotency (superseded)
-- The original lending domain added idempotency-key support on application creation. No longer applicable — removed along with the lending domain in Phase 6.
+| Metric | Score |
+|--------|-------|
+| Faithfulness | 1.00 |
+| Answer Relevancy | 0.90 |
+| Context Precision | 0.70 |
+| Context Recall | 1.00 |
 
-### Phase 4 — Celery + Redis
-- Wired up Redis as a task broker and Celery as a worker, originally for an async credit-check job. Kept wired through the domain rewrite (Phase 6) for a future async job; no task is currently registered.
+![RAGAs evaluation scores](services/agentic/docs/ragas.png)
+![LangSmith trace](services/agentic/docs/langsmith.png)
 
-### Phase 5 — Kafka (removed)
-- Kafka (KRaft mode) previously carried an event between two lending services. Removed entirely — see git history if you need it.
+## MCP
 
-### Phase 6 — EduMind domain rewrite
-- Replaced the lending domain (`LoanApplication`, a second `ledger` service for double-entry bookkeeping) with EduMind's study-assistant domain: `users`, `documents`, `quizzes`, `quiz_attempts`, all ownership-scoped via `X-User-Id`.
-- Consolidated to a single service, `core-api`, and renamed the shared database to `edumind`.
+| Tool | Description |
+|------|-------------|
+| `query_curriculum(question)` | grounded answer |
+| `get_related_concepts(topic)` | related concepts from the graph |
+| `generate_quiz(topic, num_questions)` | quiz from curriculum |
 
-### Phase 7 — Docker
-- Containerised the service with its own Dockerfile.
-- `docker-compose.yml` orchestrates core-api, the Celery worker, PostgreSQL, and Redis with healthchecks and dependency ordering. A `Makefile` wraps common commands (`make up`, `make down`, `make logs`).
+`docker compose up` starts `mcp-server` on `:8003` (streamable-http) — point any MCP client at it.
 
-### Phase 8 — Observability
-- Added `prometheus-fastapi-instrumentator` to expose a `/metrics` endpoint.
-- Prometheus scrapes metrics every 15s.
-- Grafana visualises request rate, p90 latency, and error rates per endpoint — giving production-style visibility into the running system.
-
-### Phase 9 — Notifications service (Node/gRPC)
-- Added `notifications`, a standalone Fastify + TypeScript service with its own Prisma-managed slice of the shared `edumind` database and a BullMQ queue (Redis, its own logical DB) decoupling the gRPC handler from the DB write.
-- `core-api` gained a gRPC client and a Celery task (`notify_quiz_ready`) so quiz creation dispatches a "quiz ready" notification asynchronously, with retry, instead of calling gRPC inline.
-
-### Phase 10 — Agentic service consolidation (RAG)
-- Pulled a standalone RAG-assistant project into the monorepo as `services/agentic`: PDF ingestion → chunking → local `sentence-transformers` embeddings → Chroma vector store, entity/relationship extraction into Neo4j, and a LangGraph graph fronted by the Anthropic Claude API.
-- `POST /documents/{id}/upload` was added to `core-api`, forwarding synchronously into agentic's `/upload` — a deliberate, revisit-if-it-becomes-a-problem choice (see `CLAUDE.md`'s Decisions).
-
-### Phase 11 — Chat (Q&A over a document)
-- Added `chats`/`messages` tables and `POST /chats/{chat_id}/messages`, originally synchronous: it called agentic's `/agent` inline and stored the LangGraph result (answer, quiz questions, or summary) as the assistant reply in one request.
-
-### Phase 12 — Async chat pipeline (RQ) + quiz-answer evaluation
-- Made chat answering fully async: `agentic` gained its own job queue (RQ, a third logical Redis DB) and worker process (`agentic-worker`); `/agent` became enqueue-and-ack (202), and the RQ job calls core-api back on a new `POST /internal/chat-answers` once the LLM work finishes. `POST /chats/{chat_id}/messages` itself became 202 fire-and-forget — direct-from-client quiz creation (`POST /quizzes`, `POST /quizzes/generate`) was removed, since quizzes now only originate from chat intent detection.
-- Extended the same LangGraph thread for grading: a quiz-generating chat message pauses its graph after the `quiz` node and persists `thread_id` on the `Quiz` row; answering it (`intent: "quiz_answer"`) resumes that exact thread through a new `evaluate` node, LLM-scored, and writes a `QuizAttempt` back through the same callback and notify chain.
-
-### Phase 13 — Document↔chat 1:1, atomic upload, auto-start chat
-- Collapsed `POST /documents` + `POST /documents/{id}/upload` into one atomic multipart endpoint — a document can no longer be created without a file, closing the loophole opened back in Phase 10.
-- Added a unique index on `chats.document_id` (each document has at most one chat) and made `POST /chats` idempotent per `document_id` (returns the existing chat instead of erroring on a repeat call).
-- The frontend (`remote-documents`) now auto-creates/reuses the document's chat right after a successful upload and navigates straight into it — no manual "start chat" step. Cross-remote navigation into a route owned by a different federated app (`remote-chat`'s `/chat/:chatId`) works because `react-router-dom` is a shared singleton across all 5 apps; see `frontend/CONTRACTS.md`.
-
-### Phase 14 — Merge remote-documents into remote-chat (chat-first UX)
-- Retired `remote-documents` as a standalone federated app — 3 domain/utility remotes now (`design-system`, `chat`, `notifications`), not 4. `ChatList` (`remote-chat`'s `/chat` index route) is the sole landing page; a "New chat" link leads to `/chat/new`, which now owns the upload→auto-start-chat flow moved verbatim from the old `DocumentUpload.tsx`.
-- No backend changes — `POST /documents` (atomic multipart) and idempotent-per-`document_id` `POST /chats` from Phase 13 were already exactly what this flow needed.
+![Claude MCP tool call](services/agentic/docs/mcp.png)
